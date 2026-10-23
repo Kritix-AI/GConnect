@@ -1,0 +1,30 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Pytest / Test caches
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDE & Editor files
+.vscode/*
+!.vscode/settings.json
+.idea/
+*.swp
+*.swo
+
+# Project workspace cache
+workspace/.hf_cache/
+
+# OS specific files
+.DS_Store
+Thumbs.db
+

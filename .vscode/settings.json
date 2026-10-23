@@ -1,0 +1,4 @@
+{
+    "files.readonlyFromPermissions": false,
+    "chat.permissions.default": "autoApprove"
+}

@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Connect - Remote GPU Platform</title>
+
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <!-- xterm.js CSS & JS -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
+  <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-web-links@0.9.0/lib/xterm-addon-web-links.js"></script>
+
+  <!-- Monaco Editor Loader -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs/loader.min.js"></script>
+
+  <!-- Application Stylesheet -->
+  <link rel="stylesheet" href="/static/css/styles.css">
+</head>
+<body class="dark-theme">
+  <!-- Top Application Header -->
+  <header class="app-header">
+    <div class="header-left">
+      <div class="brand-logo">
+        <i data-lucide="cpu" class="brand-icon"></i>
+        <span class="brand-title">Connect</span>
+        <span class="brand-badge">GPU Studio</span>
+      </div>
+
+      <div class="active-file-indicator" id="activeFileIndicator">
+        <i data-lucide="file-code-2" class="file-icon"></i>
+        <span id="activeFileName">No file selected</span>
+        <span class="save-status" id="saveStatus">Saved</span>
+      </div>
+    </div>
+
+    <!-- Live Hardware Telemetry Center -->
+    <div class="header-center">
+      <div class="telemetry-bar" id="telemetryPill">
+        <div class="gpu-model-badge">
+          <i data-lucide="zap" class="gpu-status-icon"></i>
+          <span id="gpuModelText">Detecting GPU...</span>
+        </div>
+
+        <div class="telemetry-metric">
+          <span class="metric-label">VRAM</span>
+          <div class="vram-meter-container">
+            <div class="vram-meter-fill" id="vramBar" style="width: 0%;"></div>
+          </div>
+          <span class="metric-value" id="vramValue">0.0 / 0.0 GB</span>
+        </div>
+
+        <div class="telemetry-metric">
+          <span class="metric-label">LOAD</span>
+          <span class="metric-value" id="gpuLoadValue">0%</span>
+        </div>
+
+        <div class="telemetry-metric">
+          <span class="metric-label">TEMP</span>
+          <span class="metric-value" id="gpuTempValue">0°C</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Actions & Run Controls -->
+    <div class="header-right">
+      <button class="btn btn-secondary btn-sm" id="btnRestartSandbox" title="Restart Docker Sandbox">
+        <i data-lucide="refresh-cw"></i>
+        <span>Restart Sandbox</span>
+      </button>
+
+      <button class="btn btn-primary btn-run" id="btnRunScript" title="Run Script in Sandbox (Ctrl+Enter)">
+        <i data-lucide="play" class="fill-current"></i>
+        <span>Run Script</span>
+        <kbd class="shortcut-tag">Ctrl+Enter</kbd>
+      </button>
+    </div>
+  </header>
+
+  <!-- Main IDE Workspace -->
+  <main class="app-body">
+    <!-- Left Sidebar: File Tree -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <span class="sidebar-title">
+          <i data-lucide="folder-git-2" class="icon-sm"></i>
+          WORKSPACE
+        </span>
+        <div class="sidebar-actions">
+          <button class="icon-btn" id="btnNewFile" title="New Python Script">
+            <i data-lucide="file-plus" class="icon-sm"></i>
+          </button>
+          <button class="icon-btn" id="btnRefreshFiles" title="Refresh Tree">
+            <i data-lucide="rotate-cw" class="icon-sm"></i>
+          </button>
+        </div>
+      </div>
+
+      <div class="file-tree-container" id="fileTreeContainer">
+        <!-- Rendered dynamically -->
+        <div class="empty-state">Loading workspace...</div>
+      </div>
+
+      <div class="sidebar-footer">
+        <div class="footer-info">
+          <i data-lucide="server" class="icon-xs"></i>
+          <span>Inference Stream Port: <strong>8001</strong></span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Center & Right: Split Editor and Terminal -->
+    <section class="workspace-viewport">
+      <!-- Monaco Code Editor Container -->
+      <div class="editor-pane" id="editorPane">
+        <div class="pane-header">
+          <div class="tab active" id="editorTab">
+            <i data-lucide="file-text" class="tab-icon"></i>
+            <span id="tabFileName">editor</span>
+          </div>
+        </div>
+        <div id="monacoEditorContainer" class="monaco-container"></div>
+      </div>
+
+      <!-- Resizable Horizontal Divider -->
+      <div class="split-divider" id="splitDivider">
+        <div class="divider-handle"></div>
+      </div>
+
+      <!-- xterm.js Terminal Container -->
+      <div class="terminal-pane" id="terminalPane">
+        <div class="pane-header terminal-header">
+          <div class="terminal-title">
+            <i data-lucide="terminal" class="tab-icon"></i>
+            <span>Interactive PTY (pytorch/pytorch sandbox)</span>
+            <span class="connection-status connected" id="terminalStatusBadge">Connected</span>
+          </div>
+          <div class="terminal-actions">
+            <button class="icon-btn" id="btnClearTerminal" title="Clear Terminal">
+              <i data-lucide="trash-2" class="icon-sm"></i>
+            </button>
+          </div>
+        </div>
+        <div id="xtermContainer" class="xterm-container"></div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Modal for Creating New File -->
+  <div class="modal-overlay hidden" id="modalOverlay">
+    <div class="modal-card">
+      <h3 class="modal-title">Create New File</h3>
+      <p class="modal-subtitle">Enter relative path (e.g. <code>voice_agent/test_whisper.py</code>):</p>
+      <input type="text" id="newFileInput" class="modal-input" placeholder="script.py" />
+      <div class="modal-actions">
+        <button class="btn btn-secondary" id="btnCancelModal">Cancel</button>
+        <button class="btn btn-primary" id="btnConfirmModal">Create</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Scripts -->
+  <script src="/static/js/telemetry.js"></script>
+  <script src="/static/js/editor.js"></script>
+  <script src="/static/js/terminal.js"></script>
+  <script src="/static/js/filetree.js"></script>
+  <script src="/static/js/app.js"></script>
+</body>
+</html>
+
