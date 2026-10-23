@@ -138,4 +138,9 @@ Environment variables can be set to override default behavior:
 | `CONNECT_CONTAINER_IMAGE` | `pytorch/pytorch:latest` | Base Docker sandbox image |
 | `CONNECT_SHM_SIZE` | `8g` | Container shared memory size |
 | `CONNECT_WORKSPACE_DIR` | `./workspace` | Directory mounted to `/workspace` |
+| `CONNECT_EPHEMERAL_MODE` | `false` | When `true`, models are kept strictly inside the container's temporary layer (Google Colab style) rather than host disk |
+
+### 🧹 Ephemeral Model Mode & Disk Cleanup
+* **Google Colab-Style Ephemeral Mode**: Set `CONNECT_EPHEMERAL_MODE=true` to ensure downloaded model weights (`~9 GB`) remain inside container temporary storage and are never written to the host's persistent disk.
+* **On-Demand Disk Cleanup**: Click **"🧹 Clean Models (Free Disk)"** in the top bar or send `POST /api/cache/wipe` at any time to instantly clear downloaded model cache from the host machine and reclaim disk space.
 

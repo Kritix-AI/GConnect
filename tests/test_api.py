@@ -84,5 +84,24 @@ def test_container_status():
     assert "container_status" in data
     assert data["inference_port"] == 8001
     assert data["shm_size"] == "8g"
-    assert data["hf_cache"] == "/workspace/.hf_cache"
+    assert "/workspace/.hf_cache" in data["hf_cache"] or "ephemeral" in data["hf_cache"]
+
+
+def test_wipe_model_cache():
+    from backend.config import settings
+
+    # 1. Create a simulated model cache file in workspace/.hf_cache
+    cache_dir = settings.WORKSPACE_DIR.resolve() / settings.HF_CACHE_DIR_NAME
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    test_model_file = cache_dir / "simulated_weights.bin"
+    test_model_file.write_bytes(b"0" * (1024 * 1024))  # 1 MB
+
+    # 2. Call wipe endpoint
+    response = client.post("/api/cache/wipe")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "success"
+    assert data["freed_mb"] >= 1.0
+    assert not test_model_file.exists()
+
 

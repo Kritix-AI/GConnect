@@ -6,6 +6,7 @@ class AppManager {
     this.editorPane = document.getElementById("editorPane");
     this.terminalPane = document.getElementById("terminalPane");
     this.btnClearTerminal = document.getElementById("btnClearTerminal");
+    this.btnWipeCache = document.getElementById("btnWipeCache");
   }
 
   init() {
@@ -38,6 +39,10 @@ class AppManager {
       this.btnClearTerminal.addEventListener("click", () => {
         window.terminalManager.clear();
       });
+    }
+
+    if (this.btnWipeCache) {
+      this.btnWipeCache.addEventListener("click", () => this.wipeModelCache());
     }
 
     window.addEventListener("keydown", (e) => {
@@ -152,6 +157,42 @@ print("========================================")
       if (btn) {
         btn.disabled = false;
         btn.innerHTML = `<i data-lucide="refresh-cw"></i><span>Restart Sandbox</span>`;
+        if (window.lucide) window.lucide.createIcons();
+      }
+    }
+  }
+
+  async wipeModelCache() {
+    if (!confirm("This will delete downloaded models from the host disk. Proceed?")) {
+      return;
+    }
+
+    const btn = this.btnWipeCache;
+    const originalHtml = btn ? btn.innerHTML : "";
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = `<i data-lucide="loader-2" class="spin"></i><span>Cleaning...</span>`;
+      if (window.lucide) window.lucide.createIcons();
+    }
+
+    try {
+      const res = await fetch("/api/cache/wipe", { method: "POST" });
+      const data = await res.json();
+      if (res.ok && data.status === "success") {
+        const freedFormatted = data.freed_mb >= 1024
+          ? `${(data.freed_mb / 1024).toFixed(2)} GB`
+          : `${data.freed_mb} MB`;
+        alert(`✅ Successfully freed ${freedFormatted} from host machine.`);
+      } else {
+        alert(`Failed to clean models: ${data.message || data.detail || "Unknown error"}`);
+      }
+    } catch (err) {
+      console.error("Wipe cache error:", err);
+      alert("Error contacting host daemon to wipe model cache.");
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = originalHtml;
         if (window.lucide) window.lucide.createIcons();
       }
     }

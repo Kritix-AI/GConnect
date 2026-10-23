@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     WORKSPACE_DIR: Path = BASE_DIR / "workspace"
     HF_CACHE_DIR_NAME: str = ".hf_cache"
 
+    # Ephemeral model cache mode (Google Colab style)
+    EPHEMERAL_MODE: bool = False
+
     # Docker sandbox configuration
     CONTAINER_NAME: str = "connect_dev_sandbox"
     CONTAINER_IMAGE: str = "pytorch/pytorch:latest"
@@ -29,4 +32,5 @@ settings = Settings()
 
 # Ensure workspace and hugging face cache directories exist
 settings.WORKSPACE_DIR.mkdir(parents=True, exist_ok=True)
-(settings.WORKSPACE_DIR / settings.HF_CACHE_DIR_NAME).mkdir(parents=True, exist_ok=True)
+if not settings.EPHEMERAL_MODE:
+    (settings.WORKSPACE_DIR / settings.HF_CACHE_DIR_NAME).mkdir(parents=True, exist_ok=True)

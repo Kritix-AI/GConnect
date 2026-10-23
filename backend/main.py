@@ -3,7 +3,7 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, WebSocket
+from fastapi import FastAPI, HTTPException, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -67,6 +67,14 @@ def get_container_status():
 def restart_container():
     success = docker_manager.restart_container()
     return {"status": "success" if success else "failed"}
+
+
+@app.post("/api/cache/wipe")
+def wipe_cache():
+    result = docker_manager.wipe_model_cache()
+    if result["status"] == "error":
+        raise HTTPException(status_code=500, detail=result["message"])
+    return result
 
 
 @app.get("/api/telemetry/snapshot")

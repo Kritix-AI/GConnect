@@ -61,7 +61,8 @@ class DockerSandboxManager:
 
         workspace_path = str(settings.WORKSPACE_DIR.resolve())
         hf_cache_path = os.path.join(workspace_path, settings.HF_CACHE_DIR_NAME)
-        os.makedirs(hf_cache_path, exist_ok=True)
+        if not settings.EPHEMERAL_MODE:
+            os.makedirs(hf_cache_path, exist_ok=True)
 
         try:
             try:
@@ -83,8 +84,10 @@ class DockerSandboxManager:
                 }
             }
 
+            hf_home = "/root/.cache/huggingface" if settings.EPHEMERAL_MODE else "/workspace/.hf_cache"
+
             environment = {
-                "HF_HOME": "/workspace/.hf_cache",
+                "HF_HOME": hf_home,
                 "PYTHONUNBUFFERED": "1",
                 "DEBIAN_FRONTEND": "noninteractive",
                 "LANG": "C.UTF-8",
@@ -126,6 +129,7 @@ class DockerSandboxManager:
 
     def get_status(self) -> Dict[str, Any]:
         """Returns the current container and Docker daemon status."""
+        hf_cache_location = "/root/.cache/huggingface (ephemeral)" if settings.EPHEMERAL_MODE else "/workspace/.hf_cache"
         status = {
             "docker_available": self.docker_available,
             "gpu_passthrough": self.gpu_passthrough_available,
@@ -134,7 +138,8 @@ class DockerSandboxManager:
             "container_id": None,
             "inference_port": settings.INFERENCE_PORT,
             "shm_size": settings.SHM_SIZE,
-            "hf_cache": "/workspace/.hf_cache"
+            "ephemeral_mode": settings.EPHEMERAL_MODE,
+            "hf_cache": hf_cache_location
         }
 
         if not self.docker_available or not self.client:
@@ -162,6 +167,71 @@ class DockerSandboxManager:
             logger.error(f"Failed to restart container: {e}")
             return False
 
+    def wipe_model_cache(self) -> Dict[str, Any]:
+        """Safely deletes all model cache files from the host workspace to free disk space."""
+        import shutil
+        import stat
+
+        hf_cache_path = settings.WORKSPACE_DIR.resolve() / settings.HF_CACHE_DIR_NAME
+
+        if not hf_cache_path.exists():
+            return {
+                "status": "success",
+                "freed_mb": 0.0,
+                "message": "No model cache found on host disk."
+            }
+
+        total_bytes = 0
+        try:
+            for entry in hf_cache_path.rglob("*"):
+                if entry.is_file():
+                    total_bytes += entry.stat().st_size
+        except Exception as e:
+            logger.warning(f"Error calculating cache size: {e}")
+
+        freed_mb = round(total_bytes / (1024 * 1024), 2)
+
+        def _remove_readonly(func, path, _):
+            try:
+                os.chmod(path, stat.S_IWRITE)
+                func(path)
+            except Exception:
+                pass
+
+        try:
+            # Wipe all files and directories inside .hf_cache
+            for item in list(hf_cache_path.iterdir()):
+                if item.is_dir():
+                    shutil.rmtree(item, onerror=_remove_readonly)
+                else:
+                    try:
+                        os.chmod(item, stat.S_IWRITE)
+                    except Exception:
+                        pass
+                    item.unlink()
+
+            # If in ephemeral mode, attempt to remove root .hf_cache directory too
+            if settings.EPHEMERAL_MODE:
+                try:
+                    os.chmod(hf_cache_path, stat.S_IWRITE)
+                    hf_cache_path.rmdir()
+                except Exception:
+                    pass
+
+            logger.info(f"Wiped model cache. Freed {freed_mb} MB.")
+            return {
+                "status": "success",
+                "freed_mb": freed_mb,
+                "message": f"Successfully freed {freed_mb} MB from host disk."
+            }
+        except Exception as e:
+            logger.error(f"Failed to wipe model cache: {e}")
+            return {
+                "status": "error",
+                "freed_mb": 0.0,
+                "message": f"Failed to wipe model cache: {e}"
+            }
+
     def create_exec_pty(self) -> Optional[Tuple[str, Any]]:
         """
         Creates an interactive bash session inside the container with hijacked raw socket.
@@ -171,6 +241,8 @@ class DockerSandboxManager:
         if not container:
             return None
 
+        hf_home = "/root/.cache/huggingface" if settings.EPHEMERAL_MODE else "/workspace/.hf_cache"
+
         try:
             exec_instance = self.client.api.exec_create(
                 container=container.id,
@@ -179,7 +251,7 @@ class DockerSandboxManager:
                 stdout=True,
                 stderr=True,
                 tty=True,
-                environment={"TERM": "xterm-256color", "HF_HOME": "/workspace/.hf_cache"}
+                environment={"TERM": "xterm-256color", "HF_HOME": hf_home}
             )
             exec_id = exec_instance["Id"]
             sock = self.client.api.exec_start(exec_id, socket=True, tty=True)
