@@ -24,10 +24,16 @@ It is specifically optimized for heavy voice and multimodal AI pipelines (such a
   * Real-time 1 Hz `pynvml` telemetry broadcasting GPU model, VRAM used/total, GPU utilization %, and temperature (with graceful CPU/Mock fallback).
 
 * **Modern Dark-Mode Web IDE**:
-  * Left sidebar file manager with inline create/delete.
-  * Monaco Editor with Python syntax highlighting and 1.5s debounced auto-save.
+  * Multi-file editor tabs with Monaco Editor, syntax highlighting, active tab tracking, and debounced auto-save.
+  * In-browser audio player modal with instant waveform preview and playback for generated speech files (`.wav`, `.mp3`, `.ogg`, `.flac`).
+  * Workspace & file exporter with one-click full project ZIP streaming and individual file downloads.
+  * Left sidebar file manager with inline create, delete, and download buttons.
   * xterm.js terminal with draggable split divider.
-  * One-click "▶ Run Script (`Ctrl+Enter`)" trigger that executes `python <active_file>.py` in the container shell.
+  * One-click "▶ Run Script (`Ctrl+Enter`)" trigger that executes `python <active_tab_file>.py` in the container shell.
+
+* **Windows System Tray App**:
+  * Run Connect completely hidden in the background without keeping an open command prompt window.
+  * System tray menu for one-click dashboard launch, copying Tailscale IP, copying Web IDE URL, and restarting/quitting the daemon.
 
 * **Security & Host Isolation**:
   * Filesystem access strictly isolated to the mounted `workspace/` directory.
@@ -71,10 +77,12 @@ It is specifically optimized for heavy voice and multimodal AI pipelines (such a
 * NVIDIA Driver + [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) (for hardware GPU passthrough)
 
 #### Windows Host:
-Simply run:
-```cmd
-scripts\setup_host.bat
-```
+* **Interactive Console Mode**:
+  ```cmd
+  scripts\setup_host.bat
+  ```
+* **Silent Background / System Tray Mode**:
+  Double-click `scripts\start_tray.bat` (or run `python scripts\tray_app.py`). Connect starts silently in the Windows system tray with a GPU chip icon. Right-click or double-click the icon to open the Web IDE, copy Tailscale IP, or exit.
 
 #### Linux Host:
 ```bash

@@ -63,6 +63,14 @@ def test_path_traversal_prevention():
         del_res = client.request("DELETE", "/api/files/delete", json={"path": bad_path})
         assert del_res.status_code == 403, f"Path traversal allowed on delete: {bad_path}"
 
+        # Attempt raw read
+        raw_res = client.get(f"/api/files/raw?path={bad_path}")
+        assert raw_res.status_code == 403, f"Path traversal allowed on raw: {bad_path}"
+
+        # Attempt download
+        down_res = client.get(f"/api/files/download?path={bad_path}")
+        assert down_res.status_code == 403, f"Path traversal allowed on download: {bad_path}"
+
 
 def test_telemetry_snapshot():
     response = client.get("/api/telemetry/snapshot")
@@ -103,5 +111,58 @@ def test_wipe_model_cache():
     assert data["status"] == "success"
     assert data["freed_mb"] >= 1.0
     assert not test_model_file.exists()
+
+
+def test_raw_audio_file():
+    from backend.config import settings
+    audio_path = settings.WORKSPACE_DIR.resolve() / "test_synth.wav"
+    audio_path.write_bytes(b"RIFF\x24\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00D\xac\x00\x00\x88X\x01\x00\x02\x00\x10\x00data\x00\x00\x00\x00")
+
+    try:
+        res = client.get("/api/files/raw?path=test_synth.wav")
+        assert res.status_code == 200
+        assert "audio/wav" in res.headers.get("content-type", "")
+        assert len(res.content) > 0
+
+        # Non-existent file
+        res_404 = client.get("/api/files/raw?path=non_existent.wav")
+        assert res_404.status_code == 404
+    finally:
+        if audio_path.exists():
+            audio_path.unlink()
+
+
+def test_download_file_and_workspace_zip():
+    import io
+    import zipfile
+    from backend.config import settings
+
+    test_file = settings.WORKSPACE_DIR.resolve() / "test_export.py"
+    test_file.write_text("# Download test", encoding="utf-8")
+
+    try:
+        # 1. Download single file
+        file_res = client.get("/api/files/download?path=test_export.py")
+        assert file_res.status_code == 200
+        assert 'attachment; filename="test_export.py"' in file_res.headers.get("content-disposition", "")
+        assert file_res.text == "# Download test"
+
+        # 2. Download whole workspace as ZIP
+        zip_res = client.get("/api/files/download?path=")
+        assert zip_res.status_code == 200
+        assert "application/zip" in zip_res.headers.get("content-type", "")
+        assert 'attachment; filename="connect_workspace.zip"' in zip_res.headers.get("content-disposition", "")
+
+        # Verify it is a valid zip archive
+        with zipfile.ZipFile(io.BytesIO(zip_res.content)) as zf:
+            namelist = zf.namelist()
+            assert any("test_export.py" in name for name in namelist)
+            # Ensure ignored folders are excluded
+            assert not any(".hf_cache" in name for name in namelist)
+            assert not any(".git" in name for name in namelist)
+    finally:
+        if test_file.exists():
+            test_file.unlink()
+
 
 

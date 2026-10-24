@@ -95,6 +95,9 @@
           WORKSPACE
         </span>
         <div class="sidebar-actions">
+          <button class="icon-btn" id="btnExportZip" title="Export Workspace as ZIP">
+            <i data-lucide="archive" class="icon-sm"></i>
+          </button>
           <button class="icon-btn" id="btnNewFile" title="New Python Script">
             <i data-lucide="file-plus" class="icon-sm"></i>
           </button>
@@ -121,10 +124,9 @@
     <section class="workspace-viewport">
       <!-- Monaco Code Editor Container -->
       <div class="editor-pane" id="editorPane">
-        <div class="pane-header">
-          <div class="tab active" id="editorTab">
-            <i data-lucide="file-text" class="tab-icon"></i>
-            <span id="tabFileName">editor</span>
+        <div class="pane-header editor-tabs-header">
+          <div class="tabs-container" id="editorTabsContainer">
+            <!-- Rendered dynamically -->
           </div>
         </div>
         <div id="monacoEditorContainer" class="monaco-container"></div>
@@ -163,6 +165,34 @@
       <div class="modal-actions">
         <button class="btn btn-secondary" id="btnCancelModal">Cancel</button>
         <button class="btn btn-primary" id="btnConfirmModal">Create</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal for Audio Preview -->
+  <div class="modal-overlay hidden" id="audioModalOverlay">
+    <div class="modal-card audio-modal-card">
+      <div class="modal-header-row">
+        <h3 class="modal-title" id="audioModalTitle">
+          <i data-lucide="music" class="icon-sm" style="color: var(--accent-blue);"></i>
+          <span id="audioFileName">Audio Preview</span>
+        </h3>
+        <button class="icon-btn" id="btnCloseAudioModal" title="Close">
+          <i data-lucide="x" class="icon-sm"></i>
+        </button>
+      </div>
+      <p class="modal-subtitle" id="audioFilePath">path/to/audio.wav</p>
+      
+      <div class="audio-player-wrapper">
+        <audio controls id="audioPreviewPlayer" class="audio-player" preload="auto"></audio>
+      </div>
+
+      <div class="modal-actions">
+        <a id="btnDownloadAudio" href="#" download class="btn btn-secondary">
+          <i data-lucide="download" class="icon-xs"></i>
+          <span>Download Audio</span>
+        </a>
+        <button class="btn btn-primary" id="btnOkAudioModal">Done</button>
       </div>
     </div>
   </div>

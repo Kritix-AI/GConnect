@@ -1,12 +1,12 @@
 class EditorManager {
   constructor() {
     this.editor = null;
-    this.activeFilePath = null;
-    this.saveTimeout = null;
+    this.tabs = []; // [{ path, name, isDirty, model, viewState }]
+    this.activeTabPath = null;
+    this.saveTimeouts = new Map();
     this.saveStatusEl = document.getElementById("saveStatus");
     this.activeFileIndicator = document.getElementById("activeFileName");
-    this.tabFileName = document.getElementById("tabFileName");
-    this.isDirty = false;
+    this.tabsContainer = document.getElementById("editorTabsContainer");
   }
 
   init(onReady) {
@@ -41,9 +41,9 @@ class EditorManager {
       );
 
       this.editor.onDidChangeModelContent(() => {
-        if (!this.activeFilePath) return;
-        this.markDirty(true);
-        this.scheduleAutoSave();
+        if (!this.activeTabPath) return;
+        this.markTabDirty(this.activeTabPath, true);
+        this.scheduleAutoSave(this.activeTabPath);
       });
 
       this.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
@@ -60,35 +60,173 @@ class EditorManager {
     });
   }
 
-  loadFile(path, content) {
-    if (this.isDirty) {
-      this.saveCurrentFile();
+  get activeFilePath() {
+    return this.activeTabPath;
+  }
+
+  detectLanguage(path) {
+    if (path.endsWith(".json")) return "json";
+    if (path.endsWith(".sh") || path.endsWith(".bash")) return "shell";
+    if (path.endsWith(".md")) return "markdown";
+    if (path.endsWith(".txt") || path.endsWith(".env")) return "plaintext";
+    if (path.endsWith(".html")) return "html";
+    if (path.endsWith(".css")) return "css";
+    if (path.endsWith(".js")) return "javascript";
+    return "python";
+  }
+
+  openFile(path, content) {
+    let tab = this.tabs.find((t) => t.path === path);
+
+    if (!tab) {
+      const filename = path.split("/").pop();
+      const language = this.detectLanguage(path);
+      const uri = monaco.Uri.parse(`inmemory://workspace/${encodeURIComponent(path)}`);
+      let model = monaco.editor.getModel(uri);
+      if (!model) {
+        model = monaco.editor.createModel(content, language, uri);
+      } else {
+        model.setValue(content);
+      }
+
+      tab = {
+        path,
+        name: filename,
+        isDirty: false,
+        model,
+        viewState: null,
+      };
+      this.tabs.push(tab);
     }
 
-    this.activeFilePath = path;
-    const filename = path.split("/").pop();
+    this.switchToTab(path);
+  }
 
-    if (this.activeFileIndicator) this.activeFileIndicator.textContent = path;
-    if (this.tabFileName) this.tabFileName.textContent = filename;
+  loadFile(path, content) {
+    this.openFile(path, content);
+  }
 
-    let language = "python";
-    if (path.endsWith(".json")) language = "json";
-    else if (path.endsWith(".sh") || path.endsWith(".bash")) language = "shell";
-    else if (path.endsWith(".md")) language = "markdown";
-    else if (path.endsWith(".txt") || path.endsWith(".env")) language = "plaintext";
+  switchToTab(path) {
+    if (!this.editor) return;
 
-    if (this.editor) {
-      const model = monaco.editor.createModel(content, language);
-      this.editor.setModel(model);
-      this.markDirty(false);
+    if (this.activeTabPath) {
+      const currentTab = this.tabs.find((t) => t.path === this.activeTabPath);
+      if (currentTab) {
+        currentTab.viewState = this.editor.saveViewState();
+      }
+    }
+
+    const tab = this.tabs.find((t) => t.path === path);
+    if (!tab) return;
+
+    this.activeTabPath = path;
+    this.editor.setModel(tab.model);
+    if (tab.viewState) {
+      this.editor.restoreViewState(tab.viewState);
+    }
+    this.editor.focus();
+
+    if (this.activeFileIndicator) {
+      this.activeFileIndicator.textContent = path;
+    }
+    this.updateSaveStatus(tab.isDirty);
+    this.renderTabs();
+
+    if (window.fileTreeManager && typeof window.fileTreeManager.setActivePath === "function") {
+      window.fileTreeManager.setActivePath(path);
     }
   }
 
-  markDirty(dirty) {
-    this.isDirty = dirty;
-    if (!this.saveStatusEl) return;
+  closeTab(path, event) {
+    if (event) {
+      event.stopPropagation();
+    }
 
-    if (dirty) {
+    const tabIndex = this.tabs.findIndex((t) => t.path === path);
+    if (tabIndex === -1) return;
+
+    const tab = this.tabs[tabIndex];
+    if (tab.isDirty) {
+      if (!confirm(`File '${tab.name}' has unsaved changes. Close without saving?`)) {
+        return;
+      }
+    }
+
+    if (tab.model) {
+      tab.model.dispose();
+    }
+
+    this.tabs.splice(tabIndex, 1);
+
+    if (this.activeTabPath === path) {
+      if (this.tabs.length > 0) {
+        const nextIndex = Math.min(tabIndex, this.tabs.length - 1);
+        this.switchToTab(this.tabs[nextIndex].path);
+      } else {
+        this.activeTabPath = null;
+        if (this.activeFileIndicator) {
+          this.activeFileIndicator.textContent = "No file selected";
+        }
+        const blankModel = monaco.editor.createModel("# Workspace empty\n", "plaintext");
+        this.editor.setModel(blankModel);
+        this.updateSaveStatus(false);
+      }
+    }
+
+    this.renderTabs();
+  }
+
+  renderTabs() {
+    if (!this.tabsContainer) return;
+    this.tabsContainer.innerHTML = "";
+
+    this.tabs.forEach((tab) => {
+      const tabEl = document.createElement("div");
+      tabEl.className = `editor-tab ${tab.path === this.activeTabPath ? "active" : ""}`;
+
+      const isPy = tab.name.endsWith(".py");
+      const iconName = isPy ? "file-code-2" : "file-text";
+
+      tabEl.innerHTML = `
+        <i data-lucide="${iconName}" class="tab-icon"></i>
+        <span>${tab.name}</span>
+        ${tab.isDirty ? '<span class="tab-dirty-dot" title="Unsaved changes"></span>' : ''}
+        <button class="tab-close-btn" title="Close Tab">
+          <i data-lucide="x" class="icon-xs"></i>
+        </button>
+      `;
+
+      tabEl.addEventListener("click", () => {
+        this.switchToTab(tab.path);
+      });
+
+      const closeBtn = tabEl.querySelector(".tab-close-btn");
+      closeBtn.addEventListener("click", (e) => {
+        this.closeTab(tab.path, e);
+      });
+
+      this.tabsContainer.appendChild(tabEl);
+    });
+
+    if (window.lucide) {
+      window.lucide.createIcons();
+    }
+  }
+
+  markTabDirty(path, dirty) {
+    const tab = this.tabs.find((t) => t.path === path);
+    if (!tab) return;
+
+    tab.isDirty = dirty;
+    if (this.activeTabPath === path) {
+      this.updateSaveStatus(dirty);
+    }
+    this.renderTabs();
+  }
+
+  updateSaveStatus(isDirty) {
+    if (!this.saveStatusEl) return;
+    if (isDirty) {
       this.saveStatusEl.textContent = "Unsaved";
       this.saveStatusEl.classList.add("unsaved");
     } else {
@@ -97,20 +235,35 @@ class EditorManager {
     }
   }
 
-  scheduleAutoSave() {
-    clearTimeout(this.saveTimeout);
-    this.saveTimeout = setTimeout(() => {
-      this.saveCurrentFile();
+  scheduleAutoSave(path) {
+    if (this.saveTimeouts.has(path)) {
+      clearTimeout(this.saveTimeouts.get(path));
+    }
+
+    const timer = setTimeout(() => {
+      this.saveFileByPath(path);
     }, 1500);
+
+    this.saveTimeouts.set(path, timer);
   }
 
   async saveCurrentFile() {
-    if (!this.activeFilePath || !this.editor) return;
+    if (!this.activeTabPath) return;
+    await this.saveFileByPath(this.activeTabPath);
+  }
 
-    clearTimeout(this.saveTimeout);
-    const content = this.editor.getValue();
+  async saveFileByPath(path) {
+    const tab = this.tabs.find((t) => t.path === path);
+    if (!tab || !tab.model) return;
 
-    if (this.saveStatusEl) {
+    if (this.saveTimeouts.has(path)) {
+      clearTimeout(this.saveTimeouts.get(path));
+      this.saveTimeouts.delete(path);
+    }
+
+    const content = tab.model.getValue();
+
+    if (this.activeTabPath === path && this.saveStatusEl) {
       this.saveStatusEl.textContent = "Saving...";
     }
 
@@ -119,29 +272,31 @@ class EditorManager {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          path: this.activeFilePath,
+          path: path,
           content: content,
         }),
       });
 
       if (res.ok) {
-        this.markDirty(false);
+        this.markTabDirty(path, false);
       } else {
-        if (this.saveStatusEl) {
+        if (this.activeTabPath === path && this.saveStatusEl) {
           this.saveStatusEl.textContent = "Save failed";
           this.saveStatusEl.classList.add("unsaved");
         }
       }
     } catch (err) {
       console.error("Save error:", err);
-      if (this.saveStatusEl) {
+      if (this.activeTabPath === path && this.saveStatusEl) {
         this.saveStatusEl.textContent = "Save error";
       }
     }
   }
 
   getValue() {
-    return this.editor ? this.editor.getValue() : "";
+    if (!this.activeTabPath) return "";
+    const tab = this.tabs.find((t) => t.path === this.activeTabPath);
+    return tab && tab.model ? tab.model.getValue() : "";
   }
 
   resize() {
@@ -152,4 +307,3 @@ class EditorManager {
 }
 
 window.editorManager = new EditorManager();
-

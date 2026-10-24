@@ -1,13 +1,27 @@
+const AUDIO_EXTS = [".wav", ".mp3", ".ogg", ".flac", ".m4a", ".webm"];
+
 class FileTreeManager {
   constructor() {
     this.container = document.getElementById("fileTreeContainer");
     this.activePath = null;
+    
+    // New file modal
     this.modalOverlay = document.getElementById("modalOverlay");
     this.newFileInput = document.getElementById("newFileInput");
     this.btnConfirmModal = document.getElementById("btnConfirmModal");
     this.btnCancelModal = document.getElementById("btnCancelModal");
     this.btnNewFile = document.getElementById("btnNewFile");
     this.btnRefreshFiles = document.getElementById("btnRefreshFiles");
+    this.btnExportZip = document.getElementById("btnExportZip");
+
+    // Audio preview modal
+    this.audioModalOverlay = document.getElementById("audioModalOverlay");
+    this.audioFileName = document.getElementById("audioFileName");
+    this.audioFilePath = document.getElementById("audioFilePath");
+    this.audioPreviewPlayer = document.getElementById("audioPreviewPlayer");
+    this.btnDownloadAudio = document.getElementById("btnDownloadAudio");
+    this.btnCloseAudioModal = document.getElementById("btnCloseAudioModal");
+    this.btnOkAudioModal = document.getElementById("btnOkAudioModal");
   }
 
   init() {
@@ -24,6 +38,12 @@ class FileTreeManager {
       this.btnNewFile.addEventListener("click", () => this.openNewFileModal());
     }
 
+    if (this.btnExportZip) {
+      this.btnExportZip.addEventListener("click", () => {
+        window.location.href = "/api/files/download?path=";
+      });
+    }
+
     if (this.btnCancelModal) {
       this.btnCancelModal.addEventListener("click", () => this.closeModal());
     }
@@ -38,6 +58,22 @@ class FileTreeManager {
         if (e.key === "Escape") this.closeModal();
       });
     }
+
+    // Audio modal events
+    if (this.btnCloseAudioModal) {
+      this.btnCloseAudioModal.addEventListener("click", () => this.closeAudioModal());
+    }
+    if (this.btnOkAudioModal) {
+      this.btnOkAudioModal.addEventListener("click", () => this.closeAudioModal());
+    }
+
+    window.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        if (this.audioModalOverlay && !this.audioModalOverlay.classList.contains("hidden")) {
+          this.closeAudioModal();
+        }
+      }
+    });
   }
 
   async loadTree() {
@@ -80,19 +116,33 @@ class FileTreeManager {
     items.forEach((item) => {
       const itemEl = document.createElement("div");
       itemEl.className = "tree-item";
+      itemEl.dataset.path = item.path;
       itemEl.style.paddingLeft = `${depth * 14 + 12}px`;
       if (item.path === this.activePath) {
         itemEl.classList.add("active");
       }
 
-      const iconName = item.type === "directory" ? "folder" : "file-code-2";
+      const isAudio = item.type === "file" && AUDIO_EXTS.some((ext) => item.name.toLowerCase().endsWith(ext));
+      let iconName = "file-code-2";
+      let iconColor = "#58a6ff";
+
+      if (item.type === "directory") {
+        iconName = "folder";
+        iconColor = "#e3b341";
+      } else if (isAudio) {
+        iconName = "music";
+        iconColor = "#a371f7";
+      }
 
       itemEl.innerHTML = `
         <div class="tree-item-label">
-          <i data-lucide="${iconName}" class="icon-sm" style="color: ${item.type === "directory" ? "#e3b341" : "#58a6ff"};"></i>
+          <i data-lucide="${iconName}" class="icon-sm" style="color: ${iconColor};"></i>
           <span>${item.name}</span>
         </div>
         <div class="tree-item-actions">
+          <button class="icon-btn btn-download-item" title="Download ${item.type === "directory" ? "as ZIP" : "file"}">
+            <i data-lucide="download" class="icon-xs"></i>
+          </button>
           <button class="icon-btn btn-delete-file" title="Delete">
             <i data-lucide="trash" class="icon-xs"></i>
           </button>
@@ -100,6 +150,12 @@ class FileTreeManager {
       `;
 
       itemEl.addEventListener("click", (e) => {
+        if (e.target.closest(".btn-download-item")) {
+          e.stopPropagation();
+          window.location.href = `/api/files/download?path=${encodeURIComponent(item.path)}`;
+          return;
+        }
+
         if (e.target.closest(".btn-delete-file")) {
           e.stopPropagation();
           this.deleteItem(item.path);
@@ -107,7 +163,11 @@ class FileTreeManager {
         }
 
         if (item.type === "file") {
-          this.selectFile(item.path);
+          if (isAudio) {
+            this.openAudioModal(item.path);
+          } else {
+            this.selectFile(item.path);
+          }
         }
       });
 
@@ -119,25 +179,66 @@ class FileTreeManager {
     });
   }
 
-  async selectFile(path) {
+  setActivePath(path) {
     this.activePath = path;
-
-    document.querySelectorAll(".tree-item").forEach((el) => {
-      el.classList.remove("active");
-    });
-
-    this.loadTree().then(async () => {
-      try {
-        const res = await fetch(`/api/files/content?path=${encodeURIComponent(path)}`);
-        if (!res.ok) throw new Error("Could not load file content");
-        const data = await res.json();
-        if (window.editorManager) {
-          window.editorManager.loadFile(path, data.content);
-        }
-      } catch (err) {
-        console.error("Load file content error:", err);
+    if (!this.container) return;
+    this.container.querySelectorAll(".tree-item").forEach((el) => {
+      if (el.dataset.path === path) {
+        el.classList.add("active");
+      } else {
+        el.classList.remove("active");
       }
     });
+  }
+
+  async selectFile(path) {
+    this.setActivePath(path);
+    try {
+      const res = await fetch(`/api/files/content?path=${encodeURIComponent(path)}`);
+      if (!res.ok) throw new Error("Could not load file content");
+      const data = await res.json();
+      if (window.editorManager) {
+        window.editorManager.loadFile(path, data.content);
+      }
+    } catch (err) {
+      console.error("Load file content error:", err);
+    }
+  }
+
+  openAudioModal(path) {
+    if (!this.audioModalOverlay) return;
+    const filename = path.split("/").pop();
+
+    if (this.audioFileName) this.audioFileName.textContent = filename;
+    if (this.audioFilePath) this.audioFilePath.textContent = path;
+
+    const rawUrl = `/api/files/raw?path=${encodeURIComponent(path)}`;
+    const downloadUrl = `/api/files/download?path=${encodeURIComponent(path)}`;
+
+    if (this.audioPreviewPlayer) {
+      this.audioPreviewPlayer.src = rawUrl;
+      this.audioPreviewPlayer.play().catch((e) => {
+        console.log("Autoplay prevented or pending user gesture:", e);
+      });
+    }
+
+    if (this.btnDownloadAudio) {
+      this.btnDownloadAudio.href = downloadUrl;
+      this.btnDownloadAudio.setAttribute("download", filename);
+    }
+
+    this.audioModalOverlay.classList.remove("hidden");
+    if (window.lucide) window.lucide.createIcons();
+  }
+
+  closeAudioModal() {
+    if (!this.audioModalOverlay) return;
+    if (this.audioPreviewPlayer) {
+      this.audioPreviewPlayer.pause();
+      this.audioPreviewPlayer.removeAttribute("src");
+      this.audioPreviewPlayer.load();
+    }
+    this.audioModalOverlay.classList.add("hidden");
   }
 
   openNewFileModal() {
@@ -198,14 +299,13 @@ class FileTreeManager {
       });
 
       if (!res.ok) throw new Error("Failed to delete");
-      await this.loadTree();
 
-      if (this.activePath === path) {
-        this.activePath = null;
-        if (window.editorManager) {
-          window.editorManager.loadFile("untitled.py", "# File deleted.\n");
-        }
+      // If active in editor tabs, close it
+      if (window.editorManager) {
+        window.editorManager.closeTab(path);
       }
+
+      await this.loadTree();
     } catch (err) {
       console.error("Delete error:", err);
       alert("Failed to delete item.");
@@ -214,4 +314,3 @@ class FileTreeManager {
 }
 
 window.fileTreeManager = new FileTreeManager();
-

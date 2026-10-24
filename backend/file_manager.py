@@ -1,9 +1,13 @@
+import io
+import mimetypes
 import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+import zipfile
 
 import aiofiles
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 from backend.config import settings
@@ -37,11 +41,14 @@ def _resolve_safe_path(rel_path: str) -> Path:
     Resolves relative path against WORKSPACE_DIR and ensures strict traversal prevention.
     Throws HTTP 403 if path escapes the workspace root or attempts absolute path access.
     """
+    base = settings.WORKSPACE_DIR.resolve()
+    if not rel_path or rel_path.strip() in ("", "."):
+        return base
+
     # Reject absolute paths, leading slashes, and Windows drive letters
     if rel_path.startswith(("/", "\\")) or Path(rel_path).is_absolute() or ":" in rel_path:
         raise HTTPException(status_code=403, detail="Access denied: absolute path forbidden.")
 
-    base = settings.WORKSPACE_DIR.resolve()
     target = (base / rel_path).resolve()
 
     try:
@@ -205,3 +212,66 @@ def rename_item(req: FileRenameRequest) -> Dict[str, Any]:
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to rename item: {e}")
+
+
+@router.get("/raw")
+def get_raw_file(path: str = Query(..., description="Relative path in workspace")):
+    """Serves raw file binary (e.g. audio files) with appropriate MIME type."""
+    target = _resolve_safe_path(path)
+
+    if not target.exists():
+        raise HTTPException(status_code=404, detail="File not found.")
+    if target.is_dir():
+        raise HTTPException(status_code=400, detail="Target is a directory.")
+
+    ext = target.suffix.lower()
+    mime_map = {
+        ".wav": "audio/wav",
+        ".mp3": "audio/mpeg",
+        ".ogg": "audio/ogg",
+        ".flac": "audio/flac",
+        ".m4a": "audio/mp4",
+        ".webm": "audio/webm",
+    }
+    media_type = mime_map.get(ext, mimetypes.guess_type(str(target))[0] or "application/octet-stream")
+
+    return FileResponse(target, media_type=media_type)
+
+
+@router.get("/download")
+def download_file_or_zip(path: str = Query("", description="Relative path in workspace")):
+    """Downloads a single file as an attachment, or zips a folder/entire workspace in-memory and streams it."""
+    target = _resolve_safe_path(path)
+
+    if not target.exists():
+        raise HTTPException(status_code=404, detail="File or folder not found.")
+
+    if target.is_file():
+        return FileResponse(
+            target,
+            filename=target.name,
+            headers={"Content-Disposition": f'attachment; filename="{target.name}"'}
+        )
+
+    # Target is directory -> Zip in-memory excluding IGNORED_NAMES
+    base = settings.WORKSPACE_DIR.resolve()
+    zip_name = "connect_workspace.zip" if target == base else f"{target.name}.zip"
+
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        for root, dirs, files in os.walk(target):
+            # Exclude ignored directories in-place
+            dirs[:] = [d for d in dirs if d not in IGNORED_NAMES]
+            for file in files:
+                if file in IGNORED_NAMES:
+                    continue
+                file_path = Path(root) / file
+                arcname = file_path.relative_to(target)
+                zf.write(file_path, arcname)
+
+    zip_buffer.seek(0)
+    return StreamingResponse(
+        zip_buffer,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{zip_name}"'}
+    )

@@ -16,7 +16,7 @@ if %ERRORLEVEL% neq 0 (
 )
 
 if not exist ".venv" (
-    echo [1/3] Creating virtual environment (.venv)...
+    echo [1/3] Creating virtual environment .venv...
     python -m venv .venv
     if %ERRORLEVEL% neq 0 (
         echo [ERROR] Failed to create virtual environment.
@@ -36,14 +36,14 @@ docker --version >nul 2>&1
 if %ERRORLEVEL% equ 0 (
     echo   - Docker CLI: Detected
 ) else (
-    echo   - Docker CLI: Not found (running in local shell fallback mode)
+    echo   - Docker CLI: Not found - running in local shell fallback mode
 )
 
 nvidia-smi >nul 2>&1
 if %ERRORLEVEL% equ 0 (
     echo   - NVIDIA GPU: Detected
 ) else (
-    echo   - NVIDIA GPU: Driver not found (using simulated telemetry)
+    echo   - NVIDIA GPU: Driver not found - using simulated telemetry
 )
 
 echo.
