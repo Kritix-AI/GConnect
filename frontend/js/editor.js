@@ -1,12 +1,13 @@
 class EditorManager {
   constructor() {
     this.editor = null;
-    this.tabs = []; // [{ path, name, isDirty, model, viewState }]
+    this.tabs = []; // [{ path, name, isDirty, mtime, model, viewState }]
     this.activeTabPath = null;
     this.saveTimeouts = new Map();
     this.saveStatusEl = document.getElementById("saveStatus");
     this.activeFileIndicator = document.getElementById("activeFileName");
     this.tabsContainer = document.getElementById("editorTabsContainer");
+    this._blankModel = null;
   }
 
   init(onReady) {
@@ -17,7 +18,7 @@ class EditorManager {
 
     require.config({
       paths: {
-        vs: "https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs",
+        vs: "vendor/monaco/vs",
       },
     });
 
@@ -25,7 +26,7 @@ class EditorManager {
       this.editor = monaco.editor.create(
         document.getElementById("monacoEditorContainer"),
         {
-          value: "# Welcome to Connect Remote GPU Platform\n# Select a file from the workspace to begin editing.\n",
+          value: "# Welcome to GConnect Remote GPU Platform\n# Select a file from the workspace to begin editing.\n",
           language: "python",
           theme: "vs-dark",
           automaticLayout: true,
@@ -75,7 +76,12 @@ class EditorManager {
     return "python";
   }
 
-  openFile(path, content) {
+  /**
+   * Opens (or refreshes) a file tab. If the tab already exists and is NOT
+   * dirty, the content is refreshed from disk so external changes (terminal
+   * runs, other clients) are never silently clobbered by autosave.
+   */
+  openFile(path, content, mtime) {
     let tab = this.tabs.find((t) => t.path === path);
 
     if (!tab) {
@@ -93,17 +99,24 @@ class EditorManager {
         path,
         name: filename,
         isDirty: false,
+        mtime: mtime || null,
         model,
         viewState: null,
       };
       this.tabs.push(tab);
+    } else if (!tab.isDirty) {
+      const current = tab.model.getValue();
+      if (current !== content) {
+        tab.model.setValue(content);
+      }
+      tab.mtime = mtime || tab.mtime;
     }
 
     this.switchToTab(path);
   }
 
-  loadFile(path, content) {
-    this.openFile(path, content);
+  loadFile(path, content, mtime) {
+    this.openFile(path, content, mtime);
   }
 
   switchToTab(path) {
@@ -137,7 +150,11 @@ class EditorManager {
     }
   }
 
-  closeTab(path, event) {
+  /**
+   * Closes a tab. `options.force` skips the unsaved-changes confirmation
+   * (used by the delete flow, which has already confirmed).
+   */
+  closeTab(path, event, options = {}) {
     if (event) {
       event.stopPropagation();
     }
@@ -146,7 +163,7 @@ class EditorManager {
     if (tabIndex === -1) return;
 
     const tab = this.tabs[tabIndex];
-    if (tab.isDirty) {
+    if (tab.isDirty && !options.force) {
       if (!confirm(`File '${tab.name}' has unsaved changes. Close without saving?`)) {
         return;
       }
@@ -154,6 +171,10 @@ class EditorManager {
 
     if (tab.model) {
       tab.model.dispose();
+    }
+    if (this.saveTimeouts.has(path)) {
+      clearTimeout(this.saveTimeouts.get(path));
+      this.saveTimeouts.delete(path);
     }
 
     this.tabs.splice(tabIndex, 1);
@@ -167,12 +188,27 @@ class EditorManager {
         if (this.activeFileIndicator) {
           this.activeFileIndicator.textContent = "No file selected";
         }
-        const blankModel = monaco.editor.createModel("# Workspace empty\n", "plaintext");
-        this.editor.setModel(blankModel);
+        if (!this._blankModel || this._blankModel.isDisposed()) {
+          this._blankModel = monaco.editor.createModel("# Workspace empty\n", "plaintext");
+        }
+        this.editor.setModel(this._blankModel);
         this.updateSaveStatus(false);
       }
     }
 
+    this.renderTabs();
+  }
+
+  /** Renames a tab in place after a /api/files/rename. */
+  renameTab(oldPath, newPath) {
+    const tab = this.tabs.find((t) => t.path === oldPath);
+    if (!tab) return;
+    tab.path = newPath;
+    tab.name = newPath.split("/").pop();
+    if (this.activeTabPath === oldPath) {
+      this.activeTabPath = newPath;
+      if (this.activeFileIndicator) this.activeFileIndicator.textContent = newPath;
+    }
     this.renderTabs();
   }
 
@@ -189,7 +225,7 @@ class EditorManager {
 
       tabEl.innerHTML = `
         <i data-lucide="${iconName}" class="tab-icon"></i>
-        <span>${tab.name}</span>
+        <span>${escapeHtml(tab.name)}</span>
         ${tab.isDirty ? '<span class="tab-dirty-dot" title="Unsaved changes"></span>' : ''}
         <button class="tab-close-btn" title="Close Tab">
           <i data-lucide="x" class="icon-xs"></i>
@@ -252,7 +288,7 @@ class EditorManager {
     await this.saveFileByPath(this.activeTabPath);
   }
 
-  async saveFileByPath(path) {
+  async saveFileByPath(path, force = false) {
     const tab = this.tabs.find((t) => t.path === path);
     if (!tab || !tab.model) return;
 
@@ -268,17 +304,33 @@ class EditorManager {
     }
 
     try {
-      const res = await fetch("/api/files/save", {
+      const res = await window.authManager.api("/api/files/save", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           path: path,
           content: content,
+          // Optimistic concurrency: refuse silent overwrites of external edits.
+          expected_mtime: force ? null : tab.mtime,
         }),
       });
 
       if (res.ok) {
+        const data = await res.json();
+        tab.mtime = data.mtime ?? tab.mtime;
         this.markTabDirty(path, false);
+      } else if (res.status === 409) {
+        // File changed on disk since it was loaded.
+        const overwrite = confirm(
+          `'${tab.name}' was changed on disk after you opened it.\n\n` +
+          "OK = overwrite the disk version with your editor content\n" +
+          "Cancel = keep the disk version and reload it into the editor"
+        );
+        if (overwrite) {
+          await this.saveFileByPath(path, true);
+        } else if (window.fileTreeManager) {
+          await window.fileTreeManager.selectFile(path, { force: true });
+        }
       } else {
         if (this.activeTabPath === path && this.saveStatusEl) {
           this.saveStatusEl.textContent = "Save failed";

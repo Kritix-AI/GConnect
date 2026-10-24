@@ -1,10 +1,8 @@
 import asyncio
 import json
 import logging
-import os
-import subprocess
 import sys
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 
@@ -15,9 +13,20 @@ logger = logging.getLogger("connect.pty")
 
 
 class PTYBridge:
-    """Bridges WebSocket communication with a Docker container PTY or fallback local shell."""
+    """Bridges WebSocket communication with a Docker container PTY.
+
+    Wire protocol:
+    - Client -> Server TEXT frames: raw terminal input (keystrokes, pastes).
+    - Client -> Server BINARY frames: JSON control messages, e.g.
+      {"type": "resize", "cols": 120, "rows": 30}.
+    - Server -> Client TEXT frames: raw terminal output (VT100/ANSI).
+    """
 
     async def handle_websocket(self, websocket: WebSocket):
+        from backend.auth import authorize_websocket
+
+        if not await authorize_websocket(websocket):
+            return
         await websocket.accept()
 
         exec_res = docker_manager.create_exec_pty()
@@ -25,9 +34,22 @@ class PTYBridge:
             exec_id, raw_socket = exec_res
             logger.info(f"Connected PTY to Docker container exec {exec_id}.")
             await self._bridge_docker_socket(websocket, exec_id, raw_socket)
-        else:
-            logger.info("Docker container unavailable. Using local fallback shell.")
+        elif settings.ALLOW_LOCAL_FALLBACK:
+            logger.warning(
+                "Docker container unavailable and CONNECT_ALLOW_LOCAL_FALLBACK=true - "
+                "exposing a HOST shell. This bypasses container isolation!"
+            )
             await self._bridge_local_fallback(websocket)
+        else:
+            logger.info("Docker container unavailable; local fallback disabled.")
+            await websocket.send_text(
+                "\r\n\x1b[1;31m[Connect]\x1b[0m Docker sandbox is not running and the local "
+                "shell fallback is disabled.\r\n"
+                "\x1b[90mStart Docker Desktop / the Docker daemon, then reconnect. The fallback "
+                "can be enabled with CONNECT_ALLOW_LOCAL_FALLBACK=true (runs a HOST shell - "
+                "use only for development on loopback).\x1b[0m\r\n\r\n"
+            )
+            await websocket.close()
 
     async def _bridge_docker_socket(self, websocket: WebSocket, exec_id: str, sock: Any):
         loop = asyncio.get_running_loop()
@@ -61,28 +83,34 @@ class PTYBridge:
             finally:
                 stop_event.set()
 
+        async def _handle_control(payload: bytes):
+            try:
+                msg = json.loads(payload.decode("utf-8", errors="replace"))
+            except json.JSONDecodeError:
+                return
+            if isinstance(msg, dict) and msg.get("type") == "resize":
+                try:
+                    cols = max(2, min(int(msg.get("cols", 80)), 1000))
+                    rows = max(2, min(int(msg.get("rows", 24)), 1000))
+                    docker_manager.resize_exec(exec_id, cols, rows)
+                except (TypeError, ValueError):
+                    pass
+
         async def ws_to_socket():
             try:
                 while not stop_event.is_set():
                     msg = await websocket.receive()
-                    if "text" in msg and msg["text"]:
-                        text_data = msg["text"]
-                        if text_data.startswith("{") and "resize" in text_data:
-                            try:
-                                payload = json.loads(text_data)
-                                if payload.get("type") == "resize":
-                                    cols = int(payload.get("cols", 80))
-                                    rows = int(payload.get("rows", 24))
-                                    docker_manager.resize_exec(exec_id, cols, rows)
-                                    continue
-                            except json.JSONDecodeError:
-                                pass
 
+                    # Binary frames are the control channel; text frames are
+                    # raw terminal input - no content sniffing.
+                    if msg.get("bytes"):
+                        await _handle_control(msg["bytes"])
+                        continue
+
+                    text_data = msg.get("text")
+                    if text_data:
                         raw_bytes = text_data.encode("utf-8")
                         await loop.run_in_executor(None, raw_sock.sendall, raw_bytes)
-
-                    elif "bytes" in msg and msg["bytes"]:
-                        await loop.run_in_executor(None, raw_sock.sendall, msg["bytes"])
 
             except (WebSocketDisconnect, asyncio.CancelledError):
                 pass
@@ -101,6 +129,10 @@ class PTYBridge:
 
         for task in pending:
             task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):
+                pass
 
         try:
             if hasattr(raw_sock, "close"):
@@ -109,13 +141,14 @@ class PTYBridge:
             pass
 
     async def _bridge_local_fallback(self, websocket: WebSocket):
-        """Fallback for environments without active Docker daemon."""
+        """Opt-in fallback (CONNECT_ALLOW_LOCAL_FALLBACK=true) for development
+        environments without a Docker daemon. Runs a shell on the HOST."""
         shell_cmd = "cmd.exe" if sys.platform == "win32" else "/bin/bash"
         workspace_dir = str(settings.WORKSPACE_DIR.resolve())
 
         intro = (
             f"\r\n\x1b[1;33m[Connect Notice]\x1b[0m Docker sandbox is not running.\r\n"
-            f"\x1b[90mRunning fallback local shell in {workspace_dir}\x1b[0m\r\n\r\n"
+            f"\x1b[90mRunning LOCAL HOST shell (fallback) in {workspace_dir}\x1b[0m\r\n\r\n"
         )
         await websocket.send_text(intro)
 
@@ -149,13 +182,12 @@ class PTYBridge:
             try:
                 while not stop_event.is_set():
                     msg = await websocket.receive()
-                    if "text" in msg and msg["text"]:
-                        text = msg["text"]
-                        if text.startswith("{") and "resize" in text:
-                            continue
-                        if proc.stdin and not proc.stdin.is_closing():
-                            proc.stdin.write(text.encode("utf-8"))
-                            await proc.stdin.drain()
+                    if msg.get("bytes"):
+                        continue  # control frames are not forwarded to the shell
+                    text = msg.get("text")
+                    if text and proc.stdin and not proc.stdin.is_closing():
+                        proc.stdin.write(text.encode("utf-8"))
+                        await proc.stdin.drain()
             except Exception:
                 pass
             finally:
@@ -172,6 +204,10 @@ class PTYBridge:
 
         for t in [out_task, err_task, in_task]:
             t.cancel()
+            try:
+                await t
+            except (asyncio.CancelledError, Exception):
+                pass
 
         try:
             proc.terminate()
@@ -180,4 +216,3 @@ class PTYBridge:
 
 
 pty_bridge = PTYBridge()
-

@@ -5,6 +5,7 @@ class TerminalManager {
     this.ws = null;
     this.statusBadge = document.getElementById("terminalStatusBadge");
     this.reconnectTimeout = null;
+    this._connecting = false;
   }
 
   init() {
@@ -53,6 +54,7 @@ class TerminalManager {
 
     this.term.onData((data) => {
       if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+        // Text frames carry raw terminal input only.
         this.ws.send(data);
       }
     });
@@ -62,38 +64,74 @@ class TerminalManager {
     });
   }
 
+  /**
+   * Idempotent: tears down any existing socket before connecting so
+   * reconnects and container restarts never leak sessions server-side.
+   */
   connect() {
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const url = `${protocol}//${window.location.host}/ws/terminal`;
+    if (this._connecting) return;
+    this._connecting = true;
 
     try {
-      this.ws = new WebSocket(url);
+      this._teardownSocket();
     } catch (err) {
-      console.warn("Terminal WebSocket error:", err);
-      this.setStatus(false);
-      this.scheduleReconnect();
-      return;
+      console.warn("Socket teardown error:", err);
     }
 
-    this.ws.onopen = () => {
-      this.setStatus(true);
-      this.fit();
-    };
+    window.authManager.ready().then(() => {
+      const url = window.authManager.wsUrl("/ws/terminal");
 
-    this.ws.onmessage = (event) => {
-      if (this.term) {
-        this.term.write(event.data);
+      try {
+        this.ws = new WebSocket(url);
+        // Accept binary frames so the control channel stays separate from text.
+        this.ws.binaryType = "arraybuffer";
+      } catch (err) {
+        console.warn("Terminal WebSocket error:", err);
+        this.setStatus(false);
+        this._connecting = false;
+        this.scheduleReconnect();
+        return;
       }
-    };
 
-    this.ws.onclose = () => {
-      this.setStatus(false);
-      this.scheduleReconnect();
-    };
+      this.ws.onopen = () => {
+        this._connecting = false;
+        this.setStatus(true);
+        this.fit();
+      };
 
-    this.ws.onerror = () => {
-      if (this.ws) this.ws.close();
-    };
+      this.ws.onmessage = (event) => {
+        if (this.term) {
+          this.term.write(event.data);
+        }
+      };
+
+      this.ws.onclose = () => {
+        this._connecting = false;
+        this.setStatus(false);
+        this.scheduleReconnect();
+      };
+
+      this.ws.onerror = () => {
+        if (this.ws) this.ws.close();
+      };
+    });
+  }
+
+  _teardownSocket() {
+    if (this.reconnectTimeout) {
+      clearTimeout(this.reconnectTimeout);
+      this.reconnectTimeout = null;
+    }
+    if (this.ws) {
+      // Remove handlers so an intentional close does not trigger reconnect.
+      this.ws.onclose = null;
+      this.ws.onerror = null;
+      this.ws.onmessage = null;
+      try {
+        this.ws.close();
+      } catch (err) { /* already closed */ }
+      this.ws = null;
+    }
   }
 
   scheduleReconnect() {
@@ -120,14 +158,17 @@ class TerminalManager {
       try {
         this.fitAddon.fit();
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-          const resizePayload = JSON.stringify({
+          // Control messages travel as BINARY frames - text frames are raw
+          // terminal input, so no sniffing is needed server-side.
+          const payload = JSON.stringify({
             type: "resize",
             cols: this.term.cols,
             rows: this.term.rows,
           });
-          this.ws.send(resizePayload);
+          this.ws.send(new TextEncoder().encode(payload));
         }
       } catch (err) {
+        /* container not measurable yet */
       }
     }
   }
@@ -154,4 +195,3 @@ class TerminalManager {
 }
 
 window.terminalManager = new TerminalManager();
-

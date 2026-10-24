@@ -4,7 +4,7 @@ class FileTreeManager {
   constructor() {
     this.container = document.getElementById("fileTreeContainer");
     this.activePath = null;
-    
+
     // New file modal
     this.modalOverlay = document.getElementById("modalOverlay");
     this.newFileInput = document.getElementById("newFileInput");
@@ -13,6 +13,13 @@ class FileTreeManager {
     this.btnNewFile = document.getElementById("btnNewFile");
     this.btnRefreshFiles = document.getElementById("btnRefreshFiles");
     this.btnExportZip = document.getElementById("btnExportZip");
+
+    // Rename modal
+    this.renameOverlay = document.getElementById("renameOverlay");
+    this.renameSubtitle = document.getElementById("renameSubtitle");
+    this.renameInput = document.getElementById("renameInput");
+    this.btnConfirmRename = document.getElementById("btnConfirmRename");
+    this.btnCancelRename = document.getElementById("btnCancelRename");
 
     // Audio preview modal
     this.audioModalOverlay = document.getElementById("audioModalOverlay");
@@ -40,7 +47,7 @@ class FileTreeManager {
 
     if (this.btnExportZip) {
       this.btnExportZip.addEventListener("click", () => {
-        window.location.href = "/api/files/download?path=";
+        window.location.href = window.authManager.urlWithToken("/api/files/download?path=");
       });
     }
 
@@ -56,6 +63,21 @@ class FileTreeManager {
       this.newFileInput.addEventListener("keydown", (e) => {
         if (e.key === "Enter") this.confirmNewFile();
         if (e.key === "Escape") this.closeModal();
+      });
+    }
+
+    if (this.btnCancelRename) {
+      this.btnCancelRename.addEventListener("click", () => this.closeRenameModal());
+    }
+
+    if (this.btnConfirmRename) {
+      this.btnConfirmRename.addEventListener("click", () => this.confirmRename());
+    }
+
+    if (this.renameInput) {
+      this.renameInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") this.confirmRename();
+        if (e.key === "Escape") this.closeRenameModal();
       });
     }
 
@@ -78,7 +100,7 @@ class FileTreeManager {
 
   async loadTree() {
     try {
-      const res = await fetch("/api/files");
+      const res = await window.authManager.api("/api/files");
       if (!res.ok) throw new Error("Failed to load workspace files");
       const data = await res.json();
       this.renderTree(data.files);
@@ -134,12 +156,16 @@ class FileTreeManager {
         iconColor = "#a371f7";
       }
 
+      // Names are escaped: file names are user/API-controlled content.
       itemEl.innerHTML = `
         <div class="tree-item-label">
           <i data-lucide="${iconName}" class="icon-sm" style="color: ${iconColor};"></i>
-          <span>${item.name}</span>
+          <span title="${escapeHtml(item.path)}">${escapeHtml(item.name)}</span>
         </div>
         <div class="tree-item-actions">
+          <button class="icon-btn btn-rename-item" title="Rename / Move">
+            <i data-lucide="pencil" class="icon-xs"></i>
+          </button>
           <button class="icon-btn btn-download-item" title="Download ${item.type === "directory" ? "as ZIP" : "file"}">
             <i data-lucide="download" class="icon-xs"></i>
           </button>
@@ -152,13 +178,21 @@ class FileTreeManager {
       itemEl.addEventListener("click", (e) => {
         if (e.target.closest(".btn-download-item")) {
           e.stopPropagation();
-          window.location.href = `/api/files/download?path=${encodeURIComponent(item.path)}`;
+          window.location.href = window.authManager.urlWithToken(
+            `/api/files/download?path=${encodeURIComponent(item.path)}`
+          );
           return;
         }
 
         if (e.target.closest(".btn-delete-file")) {
           e.stopPropagation();
           this.deleteItem(item.path);
+          return;
+        }
+
+        if (e.target.closest(".btn-rename-item")) {
+          e.stopPropagation();
+          this.openRenameModal(item.path);
           return;
         }
 
@@ -191,14 +225,25 @@ class FileTreeManager {
     });
   }
 
-  async selectFile(path) {
+  /**
+   * Loads a file into the editor. Always re-fetches from disk; the editor
+   * refreshes non-dirty tabs and guards dirty ones via mtime (409) on save.
+   * `options.force` bypasses dirty protection (used after a 409 reload).
+   */
+  async selectFile(path, options = {}) {
     this.setActivePath(path);
     try {
-      const res = await fetch(`/api/files/content?path=${encodeURIComponent(path)}`);
+      const res = await window.authManager.api(`/api/files/content?path=${encodeURIComponent(path)}`);
       if (!res.ok) throw new Error("Could not load file content");
       const data = await res.json();
       if (window.editorManager) {
-        window.editorManager.loadFile(path, data.content);
+        const tab = window.editorManager.tabs.find((t) => t.path === path);
+        if (tab && tab.isDirty && !options.force) {
+          // Keep the user's unsaved edits; save-time 409 check protects them.
+          window.editorManager.switchToTab(path);
+        } else {
+          window.editorManager.loadFile(path, data.content, data.mtime);
+        }
       }
     } catch (err) {
       console.error("Load file content error:", err);
@@ -212,8 +257,8 @@ class FileTreeManager {
     if (this.audioFileName) this.audioFileName.textContent = filename;
     if (this.audioFilePath) this.audioFilePath.textContent = path;
 
-    const rawUrl = `/api/files/raw?path=${encodeURIComponent(path)}`;
-    const downloadUrl = `/api/files/download?path=${encodeURIComponent(path)}`;
+    const rawUrl = window.authManager.urlWithToken(`/api/files/raw?path=${encodeURIComponent(path)}`);
+    const downloadUrl = window.authManager.urlWithToken(`/api/files/download?path=${encodeURIComponent(path)}`);
 
     if (this.audioPreviewPlayer) {
       this.audioPreviewPlayer.src = rawUrl;
@@ -260,7 +305,7 @@ class FileTreeManager {
     if (!filename) return;
 
     try {
-      const res = await fetch("/api/files/create", {
+      const res = await window.authManager.api("/api/files/create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -270,7 +315,7 @@ class FileTreeManager {
       });
 
       if (!res.ok) {
-        const err = await res.json();
+        const err = await res.json().catch(() => ({}));
         alert(err.detail || "Failed to create file.");
         return;
       }
@@ -286,13 +331,67 @@ class FileTreeManager {
     }
   }
 
+  openRenameModal(path) {
+    if (!this.renameOverlay) return;
+    this._renameTarget = path;
+    if (this.renameSubtitle) {
+      this.renameSubtitle.textContent = `New path for '${path}':`;
+    }
+    this.renameInput.value = path;
+    this.renameOverlay.classList.remove("hidden");
+    this.renameInput.focus();
+  }
+
+  closeRenameModal() {
+    if (this.renameOverlay) {
+      this.renameOverlay.classList.add("hidden");
+    }
+    this._renameTarget = null;
+  }
+
+  async confirmRename() {
+    const oldPath = this._renameTarget;
+    const newPath = this.renameInput.value.trim();
+    if (!oldPath || !newPath || newPath === oldPath) {
+      this.closeRenameModal();
+      return;
+    }
+
+    try {
+      const res = await window.authManager.api("/api/files/rename", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ old_path: oldPath, new_path: newPath }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert(err.detail || "Failed to rename item.");
+        return;
+      }
+
+      this.closeRenameModal();
+      await this.loadTree();
+
+      if (window.editorManager) {
+        window.editorManager.renameTab(oldPath, newPath);
+      }
+      if (this.activePath === oldPath) {
+        this.setActivePath(newPath);
+      }
+    } catch (err) {
+      console.error("Rename item error:", err);
+      alert("Failed to rename item.");
+    }
+  }
+
   async deleteItem(path) {
     if (!confirm(`Are you sure you want to delete '${path}'?`)) {
       return;
     }
 
     try {
-      const res = await fetch("/api/files/delete", {
+      const res = await window.authManager.api("/api/files/delete", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ path: path }),
@@ -300,9 +399,10 @@ class FileTreeManager {
 
       if (!res.ok) throw new Error("Failed to delete");
 
-      // If active in editor tabs, close it
+      // If open in the editor, close it without a second confirmation
+      // (deletion was already confirmed above).
       if (window.editorManager) {
-        window.editorManager.closeTab(path);
+        window.editorManager.closeTab(path, null, { force: true });
       }
 
       await this.loadTree();

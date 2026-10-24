@@ -2,7 +2,7 @@
 setlocal enabledelayedexpansion
 
 echo =======================================================
-echo   Connect - Remote GPU Development Platform Setup
+echo   GConnect - Remote GPU Development Platform Setup
 echo =======================================================
 echo.
 
@@ -36,7 +36,7 @@ docker --version >nul 2>&1
 if %ERRORLEVEL% equ 0 (
     echo   - Docker CLI: Detected
 ) else (
-    echo   - Docker CLI: Not found - running in local shell fallback mode
+    echo   - Docker CLI: Not found - terminal will show a notice
 )
 
 nvidia-smi >nul 2>&1
@@ -46,15 +46,21 @@ if %ERRORLEVEL% equ 0 (
     echo   - NVIDIA GPU: Driver not found - using simulated telemetry
 )
 
+REM Honor the same env vars as the daemon (see .env.example).
+if "%CONNECT_ALLOW_LAN%"=="true" (
+    if "%CONNECT_HOST%"=="" set CONNECT_HOST=0.0.0.0
+)
+if "%CONNECT_HOST%"=="" set CONNECT_HOST=127.0.0.1
+if "%CONNECT_PORT%"=="" set CONNECT_PORT=8000
+
 echo.
 echo =======================================================
-echo   Starting Connect Host Daemon...
-echo   Web IDE:             http://localhost:8000
-echo   Inference Stream:    Port 8001 (Forwarded to container)
+echo   Starting GConnect Host Daemon...
+echo   Web IDE:             http://%CONNECT_HOST%:%CONNECT_PORT%
+echo   Inference Stream:    Port %CONNECT_INFERENCE_PORT% (Forwarded to container)
 echo =======================================================
 echo.
 
-python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
+python -m uvicorn backend.main:app --host %CONNECT_HOST% --port %CONNECT_PORT% --reload
 
 pause
-

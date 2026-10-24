@@ -24,7 +24,21 @@ htmlcov/
 # Project workspace cache
 workspace/.hf_cache/
 
+# GConnect runtime state (auth token, logs)
+.gconnect/
+.env
+
 # OS specific files
 .DS_Store
 Thumbs.db
 
+# Node / Tauri desktop app
+node_modules/
+src-tauri/target/
+src-tauri/gen/
+dist/
+
+# PyInstaller sidecar build output
+build/
+dist/gconnect-backend*
+src-tauri/binaries/

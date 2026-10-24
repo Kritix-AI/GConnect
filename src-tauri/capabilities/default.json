@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "GConnect main window: core APIs only. No filesystem, shell, or http permissions are exposed to the webview; the daemon sidecar is managed entirely from Rust.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

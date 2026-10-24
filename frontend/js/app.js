@@ -9,14 +9,19 @@ class AppManager {
     this.btnWipeCache = document.getElementById("btnWipeCache");
   }
 
-  init() {
+  async init() {
     if (window.lucide) {
       window.lucide.createIcons();
     }
 
+    await window.authManager.ready();
+
     window.telemetryManager.init();
     window.terminalManager.init();
     window.fileTreeManager.init();
+    if (window.clusterManager) {
+      window.clusterManager.init();
+    }
 
     window.editorManager.init(() => {
       this.ensureSampleScript();
@@ -58,17 +63,17 @@ class AppManager {
 
   async ensureSampleScript() {
     try {
-      const res = await fetch("/api/files");
+      const res = await window.authManager.api("/api/files");
       const data = await res.json();
       if (!data.files || data.files.length === 0) {
-        const defaultScript = `# Connect - Remote GPU Development Platform
+        const defaultScript = `# GConnect - Remote GPU Development Platform
 # Specifically configured for PyTorch, CUDA, and Voice Agent workflows
 
 import os
 import torch
 
 print("========================================")
-print(" Connect GPU Sandbox Ready")
+print(" GConnect GPU Sandbox Ready")
 print("========================================")
 print(f"PyTorch Version: {torch.__version__}")
 print(f"CUDA Available:  {torch.cuda.is_available()}")
@@ -82,7 +87,7 @@ if torch.cuda.is_available():
 print(f"Hugging Face Cache: {os.environ.get('HF_HOME')}")
 print("========================================")
 `;
-        await fetch("/api/files/save", {
+        await window.authManager.api("/api/files/save", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -122,6 +127,11 @@ print("========================================")
       return;
     }
 
+    if (!activePath.toLowerCase().endsWith(".py")) {
+      alert(`Only Python (.py) files can be run. '${activePath}' is not a Python script.`);
+      return;
+    }
+
     await window.editorManager.saveCurrentFile();
     console.log(`Executing ${activePath} in container sandbox...`);
     window.terminalManager.sendCommand(`python "${activePath}"`);
@@ -137,12 +147,14 @@ print("========================================")
     if (btn) {
       btn.disabled = true;
       btn.innerHTML = `<i data-lucide="loader-2" class="spin"></i><span>Restarting...</span>`;
+      if (window.lucide) window.lucide.createIcons();
     }
 
     try {
-      const res = await fetch("/api/container/restart", { method: "POST" });
+      const res = await window.authManager.api("/api/container/restart", { method: "POST" });
       const data = await res.json();
       if (data.status === "success") {
+        // connect() is idempotent: it closes the old socket/session first.
         setTimeout(() => {
           window.terminalManager.connect();
           alert("Docker sandbox restarted successfully.");
@@ -176,13 +188,17 @@ print("========================================")
     }
 
     try {
-      const res = await fetch("/api/cache/wipe", { method: "POST" });
+      const res = await window.authManager.api("/api/cache/wipe", { method: "POST" });
       const data = await res.json();
-      if (res.ok && data.status === "success") {
+      if (res.ok && (data.status === "success" || data.status === "partial")) {
         const freedFormatted = data.freed_mb >= 1024
           ? `${(data.freed_mb / 1024).toFixed(2)} GB`
           : `${data.freed_mb} MB`;
-        alert(`✅ Successfully freed ${freedFormatted} from host machine.`);
+        if (data.status === "partial") {
+          alert(`Partially cleaned: freed ${freedFormatted}, but some entries could not be deleted.\n${data.message || ""}`);
+        } else {
+          alert(`Successfully freed ${freedFormatted} from host machine.`);
+        }
       } else {
         alert(`Failed to clean models: ${data.message || data.detail || "Unknown error"}`);
       }
@@ -244,4 +260,3 @@ document.addEventListener("DOMContentLoaded", () => {
   window.appManager = new AppManager();
   window.appManager.init();
 });
-

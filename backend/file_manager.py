@@ -1,25 +1,32 @@
 import io
 import mimetypes
 import os
+import tempfile
+import uuid
+import zipfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-import zipfile
 
 import aiofiles
 from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from backend.config import settings
 
 router = APIRouter(prefix="/api/files", tags=["files"])
 
-IGNORED_NAMES = {".git", ".hf_cache", "__pycache__", ".venv", ".pytest_cache", ".vscode"}
+IGNORED_NAMES = {".git", ".hf_cache", "__pycache__", ".venv", ".pytest_cache", ".vscode", ".gconnect"}
+
+# Hard limits protecting the scan from pathological trees.
+MAX_SCAN_DEPTH = 24
+MAX_SCAN_ENTRIES = 20000
 
 
 class FileSaveRequest(BaseModel):
     path: str
     content: str
+    expected_mtime: Optional[float] = None  # optimistic-concurrency guard
 
 
 class FileCreateRequest(BaseModel):
@@ -61,8 +68,31 @@ def _resolve_safe_path(rel_path: str) -> Path:
     return target
 
 
-def _scan_directory(current_dir: Path, base_dir: Path) -> List[Dict[str, Any]]:
+def _file_mtime(path: Path) -> float:
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return 0.0
+
+
+def _scan_directory(current_dir: Path, base_dir: Path, depth: int = 0, state: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+    """Builds the hierarchical tree. Guards against symlink/junction cycles
+    (visited set on realpath), skips symlinked directories entirely (they can
+    point outside the workspace), and caps depth/total entries."""
+    if state is None:
+        state = {"visited": set(), "count": 0}
+
     items: List[Dict[str, Any]] = []
+    if depth > MAX_SCAN_DEPTH:
+        return items
+
+    try:
+        real = os.path.realpath(current_dir)
+        if real in state["visited"]:
+            return items
+        state["visited"].add(real)
+    except Exception:
+        return items
 
     try:
         entries = sorted(list(current_dir.iterdir()), key=lambda e: (not e.is_dir(), e.name.lower()))
@@ -70,20 +100,30 @@ def _scan_directory(current_dir: Path, base_dir: Path) -> List[Dict[str, Any]]:
         return items
 
     for entry in entries:
+        if state["count"] >= MAX_SCAN_ENTRIES:
+            return items
         if entry.name in IGNORED_NAMES:
             continue
 
+        # Symlinked directories are skipped: cycles and out-of-workspace leaks.
+        if entry.is_dir() and entry.is_symlink():
+            continue
+
         rel_path = str(entry.relative_to(base_dir)).replace("\\", "/")
+        state["count"] += 1
 
         if entry.is_dir():
             items.append({
                 "name": entry.name,
                 "path": rel_path,
                 "type": "directory",
-                "children": _scan_directory(entry, base_dir)
+                "children": _scan_directory(entry, base_dir, depth + 1, state)
             })
         else:
-            size_bytes = entry.stat().st_size
+            try:
+                size_bytes = entry.stat().st_size
+            except OSError:
+                size_bytes = 0
             items.append({
                 "name": entry.name,
                 "path": rel_path,
@@ -108,7 +148,7 @@ def list_files() -> Dict[str, Any]:
 
 @router.get("/content")
 async def get_file_content(path: str = Query(..., description="Relative path in workspace")) -> Dict[str, Any]:
-    """Reads file text content from the workspace."""
+    """Reads file text content from the workspace (size-capped)."""
     target = _resolve_safe_path(path)
 
     if not target.exists():
@@ -117,33 +157,58 @@ async def get_file_content(path: str = Query(..., description="Relative path in 
         raise HTTPException(status_code=400, detail="Target is a directory.")
 
     try:
+        if target.stat().st_size > settings.MAX_CONTENT_READ_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail="File is too large to open in the editor. Use the download button instead.",
+            )
         async with aiofiles.open(target, mode="r", encoding="utf-8", errors="replace") as f:
             content = await f.read()
         return {
             "path": path,
-            "content": content
+            "content": content,
+            "mtime": _file_mtime(target),
         }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to read file: {e}")
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to read file.")
 
 
 @router.post("/save")
 async def save_file(req: FileSaveRequest) -> Dict[str, Any]:
-    """Saves file content to the workspace safely."""
+    """Saves file content atomically (temp file + rename). When expected_mtime
+    is provided and the file on disk is newer, responds 409 so the client can
+    ask the user before overwriting external changes."""
     target = _resolve_safe_path(req.path)
+
+    if req.expected_mtime is not None and target.exists():
+        if _file_mtime(target) > req.expected_mtime + 0.001:
+            raise HTTPException(
+                status_code=409,
+                detail="File changed on disk after it was loaded. Overwrite?",
+            )
 
     target.parent.mkdir(parents=True, exist_ok=True)
 
+    tmp_path = target.parent / f".{target.name}.gconnect-tmp-{uuid.uuid4().hex[:8]}"
     try:
-        async with aiofiles.open(target, mode="w", encoding="utf-8") as f:
+        async with aiofiles.open(tmp_path, mode="w", encoding="utf-8") as f:
             await f.write(req.content)
-        return {
-            "status": "success",
-            "path": req.path,
-            "bytes_written": len(req.content.encode("utf-8"))
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to write file: {e}")
+        os.replace(tmp_path, target)
+    except Exception:
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise HTTPException(status_code=500, detail="Failed to write file.")
+
+    return {
+        "status": "success",
+        "path": req.path,
+        "bytes_written": len(req.content.encode("utf-8")),
+        "mtime": _file_mtime(target),
+    }
 
 
 @router.post("/create")
@@ -165,8 +230,8 @@ def create_item(req: FileCreateRequest) -> Dict[str, Any]:
             "path": req.path,
             "is_directory": req.is_directory
         }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to create item: {e}")
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to create item.")
 
 
 @router.delete("/delete")
@@ -187,8 +252,8 @@ def delete_item(req: FileDeleteRequest) -> Dict[str, Any]:
             "status": "success",
             "path": req.path
         }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to delete item: {e}")
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to delete item.")
 
 
 @router.post("/rename")
@@ -210,8 +275,8 @@ def rename_item(req: FileRenameRequest) -> Dict[str, Any]:
             "old_path": req.old_path,
             "new_path": req.new_path
         }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to rename item: {e}")
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to rename item.")
 
 
 @router.get("/raw")
@@ -240,7 +305,9 @@ def get_raw_file(path: str = Query(..., description="Relative path in workspace"
 
 @router.get("/download")
 def download_file_or_zip(path: str = Query("", description="Relative path in workspace")):
-    """Downloads a single file as an attachment, or zips a folder/entire workspace in-memory and streams it."""
+    """Downloads a single file as an attachment, or zips a folder/entire
+    workspace to a temp file and streams it (memory-safe for large workspaces;
+    the temp file is removed after the response is sent)."""
     target = _resolve_safe_path(path)
 
     if not target.exists():
@@ -253,25 +320,53 @@ def download_file_or_zip(path: str = Query("", description="Relative path in wor
             headers={"Content-Disposition": f'attachment; filename="{target.name}"'}
         )
 
-    # Target is directory -> Zip in-memory excluding IGNORED_NAMES
+    # Target is directory -> Zip on disk (not in RAM) excluding IGNORED_NAMES
     base = settings.WORKSPACE_DIR.resolve()
-    zip_name = "connect_workspace.zip" if target == base else f"{target.name}.zip"
+    zip_name = "gconnect_workspace.zip" if target == base else f"{target.name}.zip"
 
-    zip_buffer = io.BytesIO()
-    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-        for root, dirs, files in os.walk(target):
-            # Exclude ignored directories in-place
-            dirs[:] = [d for d in dirs if d not in IGNORED_NAMES]
-            for file in files:
-                if file in IGNORED_NAMES:
-                    continue
-                file_path = Path(root) / file
-                arcname = file_path.relative_to(target)
-                zf.write(file_path, arcname)
+    tmp_fd, tmp_name = tempfile.mkstemp(prefix="gconnect-zip-", suffix=".zip")
+    os.close(tmp_fd)
+    tmp_path = Path(tmp_name)
 
-    zip_buffer.seek(0)
+    try:
+        with zipfile.ZipFile(tmp_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            for root, dirs, files in os.walk(target, followlinks=False):
+                dirs[:] = [d for d in dirs if d not in IGNORED_NAMES]
+                for file in files:
+                    if file in IGNORED_NAMES:
+                        continue
+                    file_path = Path(root) / file
+                    arcname = file_path.relative_to(target)
+                    zf.write(file_path, arcname)
+    except Exception:
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise HTTPException(status_code=500, detail="Failed to archive workspace.")
+
+    from fastapi.responses import StreamingResponse
+    from starlette.background import BackgroundTask
+
+    def _cleanup():
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    file_like = open(tmp_path, "rb")
+
+    def _iter_file():
+        with file_like:
+            while True:
+                chunk = file_like.read(1024 * 1024)
+                if not chunk:
+                    break
+                yield chunk
+
     return StreamingResponse(
-        zip_buffer,
+        _iter_file(),
         media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="{zip_name}"'}
+        headers={"Content-Disposition": f'attachment; filename="{zip_name}"'},
+        background=BackgroundTask(_cleanup),
     )

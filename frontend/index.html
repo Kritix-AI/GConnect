@@ -3,22 +3,22 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Connect - Remote GPU Platform</title>
+  <title>GConnect</title>
 
-  <!-- Lucide Icons -->
-  <script src="https://unpkg.com/lucide@latest"></script>
+  <!-- All libraries are vendored locally (offline-capable, pinned versions) -->
+  <script src="vendor/lucide/lucide.min.js"></script>
 
-  <!-- xterm.js CSS & JS -->
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
-  <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-web-links@0.9.0/lib/xterm-addon-web-links.js"></script>
+  <!-- xterm.js -->
+  <link rel="stylesheet" href="vendor/xterm/xterm.css" />
+  <script src="vendor/xterm/xterm.js"></script>
+  <script src="vendor/xterm/xterm-addon-fit.js"></script>
+  <script src="vendor/xterm/xterm-addon-web-links.js"></script>
 
-  <!-- Monaco Editor Loader -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs/loader.min.js"></script>
+  <!-- Monaco Editor -->
+  <script src="vendor/monaco/vs/loader.js"></script>
 
   <!-- Application Stylesheet -->
-  <link rel="stylesheet" href="/static/css/styles.css">
+  <link rel="stylesheet" href="css/styles.css">
 </head>
 <body class="dark-theme">
   <!-- Top Application Header -->
@@ -26,7 +26,7 @@
     <div class="header-left">
       <div class="brand-logo">
         <i data-lucide="cpu" class="brand-icon"></i>
-        <span class="brand-title">Connect</span>
+        <span class="brand-title">GConnect</span>
         <span class="brand-badge">GPU Studio</span>
       </div>
 
@@ -41,8 +41,11 @@
     <div class="header-center">
       <div class="telemetry-bar" id="telemetryPill">
         <div class="gpu-model-badge">
+          <span class="live-dot" id="telemetryLiveDot" title="Telemetry freshness"></span>
           <i data-lucide="zap" class="gpu-status-icon"></i>
           <span id="gpuModelText">Detecting GPU...</span>
+          <span class="sim-badge hidden" id="gpuSimBadge" title="No NVIDIA GPU detected on this machine">NO GPU</span>
+          <span class="sim-badge stale hidden" id="telemetryStaleBadge" title="No telemetry updates received for over 3 seconds">STALE</span>
         </div>
 
         <div class="telemetry-metric">
@@ -54,7 +57,7 @@
         </div>
 
         <div class="telemetry-metric">
-          <span class="metric-label">LOAD</span>
+          <span class="metric-label">UTILIZATION</span>
           <span class="metric-value" id="gpuLoadValue">0%</span>
         </div>
 
@@ -66,12 +69,17 @@
 
       <button class="btn btn-secondary btn-sm" id="btnWipeCache" title="Wipe downloaded Hugging Face model cache to free host disk space">
         <i data-lucide="trash-2"></i>
-        <span>🧹 Clean Models (Free Disk)</span>
+        <span>Clean Models (Free Disk)</span>
       </button>
     </div>
 
     <!-- Actions & Run Controls -->
     <div class="header-right">
+      <button class="btn btn-secondary btn-sm" id="btnCluster" title="GPU Cluster: connect GConnect daemons on other PCs and pool their GPUs">
+        <i data-lucide="network"></i>
+        <span id="clusterBtnLabel">Cluster</span>
+      </button>
+
       <button class="btn btn-secondary btn-sm" id="btnRestartSandbox" title="Restart Docker Sandbox">
         <i data-lucide="refresh-cw"></i>
         <span>Restart Sandbox</span>
@@ -142,7 +150,7 @@
         <div class="pane-header terminal-header">
           <div class="terminal-title">
             <i data-lucide="terminal" class="tab-icon"></i>
-            <span>Interactive PTY (pytorch/pytorch sandbox)</span>
+            <span>Interactive PTY (pytorch sandbox)</span>
             <span class="connection-status connected" id="terminalStatusBadge">Connected</span>
           </div>
           <div class="terminal-actions">
@@ -169,6 +177,19 @@
     </div>
   </div>
 
+  <!-- Modal for Renaming a File -->
+  <div class="modal-overlay hidden" id="renameOverlay">
+    <div class="modal-card">
+      <h3 class="modal-title">Rename / Move</h3>
+      <p class="modal-subtitle" id="renameSubtitle">Enter the new relative path:</p>
+      <input type="text" id="renameInput" class="modal-input" placeholder="new_name.py" />
+      <div class="modal-actions">
+        <button class="btn btn-secondary" id="btnCancelRename">Cancel</button>
+        <button class="btn btn-primary" id="btnConfirmRename">Rename</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Modal for Audio Preview -->
   <div class="modal-overlay hidden" id="audioModalOverlay">
     <div class="modal-card audio-modal-card">
@@ -182,7 +203,7 @@
         </button>
       </div>
       <p class="modal-subtitle" id="audioFilePath">path/to/audio.wav</p>
-      
+
       <div class="audio-player-wrapper">
         <audio controls id="audioPreviewPlayer" class="audio-player" preload="auto"></audio>
       </div>
@@ -197,12 +218,80 @@
     </div>
   </div>
 
+  <!-- Modal for the GPU Cluster (multi-PC / multi-GPU) -->
+  <div class="modal-overlay hidden" id="clusterOverlay">
+    <div class="modal-card cluster-modal-card">
+      <div class="modal-header-row">
+        <h3 class="modal-title">
+          <i data-lucide="network" class="icon-sm" style="color: var(--accent-blue);"></i>
+          <span>GPU Cluster</span>
+        </h3>
+        <button class="icon-btn" id="btnCloseCluster" title="Close">
+          <i data-lucide="x" class="icon-sm"></i>
+        </button>
+      </div>
+      <p class="modal-subtitle">
+        Run the GConnect daemon on each PC, then add it here. All real GPUs
+        (multi-GPU PCs included) appear in one place with pooled VRAM.
+      </p>
+
+      <div class="cluster-summary" id="clusterSummary">
+        <div class="cluster-stat">
+          <span class="metric-label">NODES</span>
+          <span class="metric-value" id="clusterNodeCount">1/1 online</span>
+        </div>
+        <div class="cluster-stat">
+          <span class="metric-label">GPUS</span>
+          <span class="metric-value" id="clusterGpuCount">0</span>
+        </div>
+        <div class="cluster-stat">
+          <span class="metric-label">POOLED VRAM</span>
+          <span class="metric-value" id="clusterVram">0.0 GB</span>
+        </div>
+      </div>
+
+      <div class="cluster-node-list" id="clusterNodeList">
+        <!-- Rendered dynamically -->
+      </div>
+
+      <div class="cluster-add-form">
+        <input type="text" id="clusterNodeName" class="modal-input cluster-input-name" placeholder="Name (e.g. aryan-desktop)" />
+        <input type="text" id="clusterNodeUrl" class="modal-input cluster-input-url" placeholder="http://<pc-ip-or-tailscale-host>:8000" />
+        <input type="password" id="clusterNodeToken" class="modal-input cluster-input-token" placeholder="Daemon token" />
+        <button class="btn btn-primary btn-sm" id="btnAddClusterNode">
+          <i data-lucide="plus" class="icon-xs"></i><span>Add</span>
+        </button>
+      </div>
+      <p class="cluster-hint">
+        On the remote PC start the daemon with
+        <code>CONNECT_ALLOW_LAN=true</code> and a fixed <code>CONNECT_AUTH_TOKEN</code>
+        (see .env.example). Best over Tailscale/WireGuard.
+      </p>
+    </div>
+  </div>
+
+  <!-- Modal for authentication (browser/remote mode only; the desktop app
+       receives the token automatically via IPC) -->
+  <div class="modal-overlay hidden" id="authOverlay">
+    <div class="modal-card">
+      <h3 class="modal-title">Authentication Required</h3>
+      <p class="modal-subtitle">Enter the GConnect access token
+        (<code>CONNECT_AUTH_TOKEN</code> of the daemon, or
+        <code>.gconnect/auth_token</code> on the GPU host):</p>
+      <input type="password" id="authTokenInput" class="modal-input" placeholder="Access token" />
+      <div class="modal-actions">
+        <button class="btn btn-primary" id="btnConfirmAuth">Connect</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Scripts -->
-  <script src="/static/js/telemetry.js"></script>
-  <script src="/static/js/editor.js"></script>
-  <script src="/static/js/terminal.js"></script>
-  <script src="/static/js/filetree.js"></script>
-  <script src="/static/js/app.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/telemetry.js"></script>
+  <script src="js/cluster.js"></script>
+  <script src="js/editor.js"></script>
+  <script src="js/terminal.js"></script>
+  <script src="js/filetree.js"></script>
+  <script src="js/app.js"></script>
 </body>
 </html>
-

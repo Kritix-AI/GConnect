@@ -100,33 +100,48 @@ class ConnectTrayApp:
         self.icon: pystray.Icon | None = None
 
     def start_daemon(self):
-        """Spawns the Connect FastAPI host daemon in a hidden background process."""
+        """Spawns the GConnect FastAPI host daemon in a hidden background
+        process. Logs go to .gconnect/logs/tray-daemon.log (never discarded)."""
         if self.daemon_proc and self.daemon_proc.poll() is None:
             return
 
+        # Honor the same env vars as the daemon (see .env.example).
+        host = os.environ.get("CONNECT_HOST", "127.0.0.1")
+        if os.environ.get("CONNECT_ALLOW_LAN", "").lower() == "true" and host == "127.0.0.1":
+            host = "0.0.0.0"
+        port = os.environ.get("CONNECT_PORT", "8000")
+
         python_exe = sys.executable
-        # Ensure working directory is repo root
         cmd = [
             python_exe,
             "-m",
             "uvicorn",
             "backend.main:app",
             "--host",
-            "0.0.0.0",
+            host,
             "--port",
-            "8000"
+            port,
+            "--log-level",
+            "info",
         ]
+
+        log_dir = REPO_ROOT / ".gconnect" / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_file = open(log_dir / "tray-daemon.log", "ab")
 
         try:
             self.daemon_proc = subprocess.Popen(
                 cmd,
                 cwd=str(REPO_ROOT),
                 creationflags=WIN_NO_WINDOW,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
+                stdout=log_file,
+                stderr=subprocess.STDOUT
             )
         except Exception as e:
-            print(f"Failed to start Connect daemon: {e}")
+            print(f"Failed to start GConnect daemon: {e}")
+        finally:
+            # Popen duplicates the handle; closing ours is safe.
+            log_file.close()
 
     def stop_daemon(self):
         """Terminates the host daemon and all child worker processes."""
@@ -147,30 +162,30 @@ class ConnectTrayApp:
                 self.daemon_proc = None
 
     def on_open_dashboard(self, icon, item):
-        webbrowser.open("http://localhost:8000")
+        webbrowser.open("http://localhost:" + os.environ.get("CONNECT_PORT", "8000"))
 
     def on_copy_tailscale(self, icon, item):
         ip = get_tailscale_ip()
         if ip:
             copy_to_clipboard(ip)
             if hasattr(icon, "notify"):
-                icon.notify(f"Tailscale IP: {ip} copied to clipboard.", "Connect Platform")
+                icon.notify(f"Tailscale IP: {ip} copied to clipboard.", "GConnect Platform")
         else:
             if hasattr(icon, "notify"):
-                icon.notify("Tailscale not detected or offline.", "Connect Platform")
+                icon.notify("Tailscale not detected or offline.", "GConnect Platform")
 
     def on_copy_dashboard_url(self, icon, item):
-        url = "http://localhost:8000"
+        url = "http://localhost:" + os.environ.get("CONNECT_PORT", "8000")
         copy_to_clipboard(url)
         if hasattr(icon, "notify"):
-            icon.notify(f"{url} copied to clipboard.", "Connect Platform")
+            icon.notify(f"{url} copied to clipboard.", "GConnect Platform")
 
     def on_restart_daemon(self, icon, item):
         self.stop_daemon()
         time.sleep(1)
         self.start_daemon()
         if hasattr(icon, "notify"):
-            icon.notify("Host daemon restarted successfully.", "Connect Platform")
+            icon.notify("Host daemon restarted successfully.", "GConnect Platform")
 
     def on_quit(self, icon, item):
         self.stop_daemon()
@@ -181,7 +196,7 @@ class ConnectTrayApp:
         self.start_daemon()
 
         menu = pystray.Menu(
-            pystray.MenuItem("Connect GPU Platform (Running)", None, enabled=False),
+            pystray.MenuItem("GConnect GPU Platform (Running)", None, enabled=False),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("🌐 Open Web IDE", self.on_open_dashboard, default=True),
             pystray.MenuItem("📋 Copy Tailscale IP", self.on_copy_tailscale),
@@ -189,13 +204,13 @@ class ConnectTrayApp:
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("🔄 Restart Host Daemon", self.on_restart_daemon),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem("❌ Quit Connect", self.on_quit)
+            pystray.MenuItem("❌ Quit GConnect", self.on_quit)
         )
 
         self.icon = pystray.Icon(
-            "ConnectTray",
+            "GConnectTray",
             create_tray_icon(),
-            "Connect - Remote GPU Platform",
+            "GConnect - Remote GPU Platform",
             menu
         )
 

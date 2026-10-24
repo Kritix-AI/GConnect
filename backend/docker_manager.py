@@ -1,6 +1,11 @@
+import hashlib
+import json
 import logging
 import os
-from typing import Any, Dict, Optional, Tuple
+import shutil
+import stat
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
 from backend.config import settings
 
@@ -14,12 +19,48 @@ except ImportError:
     HAS_DOCKER = False
     logger.warning("docker Python library not installed.")
 
+# Label holding a fingerprint of the sandbox configuration. When the desired
+# config changes (image, shm, ports, cache mode...) the container is recreated
+# so settings actually apply instead of being silently ignored.
+CONFIG_LABEL = "dev.gconnect.config"
+
+
+def _nvidia_cdi_specs() -> List[str]:
+    """Names of NVIDIA CDI spec files found in well-known CDI directories
+    (Linux + Docker Desktop paths)."""
+    from pathlib import Path
+
+    candidates = [
+        "/var/run/cdi",
+        "/etc/cdi",
+        "/etc/nvidia-cdi",
+        str(Path.home() / ".config" / "cdi"),
+    ]
+    found: List[str] = []
+    for c in candidates:
+        p = Path(c)
+        if p.is_dir():
+            for spec in p.glob("*.json"):
+                if "nvidia" in spec.name.lower():
+                    found.append(spec.name)
+    return found
+
+
+def _rmtree_supported_kwargs() -> Dict[str, Any]:
+    """shutil.rmtree got `onexc` in 3.12; `onerror` is deprecated."""
+    import inspect
+    params = inspect.signature(shutil.rmtree).parameters
+    if "onexc" in params:
+        return {"onexc": True}
+    return {"onerror": True}
+
 
 class DockerSandboxManager:
     def __init__(self):
         self.client: Optional[Any] = None
         self.docker_available: bool = False
         self.gpu_passthrough_available: bool = False
+        self.gpu_degraded_reason: str = ""
         self._init_docker()
 
     def _init_docker(self):
@@ -37,25 +78,57 @@ class DockerSandboxManager:
             self.docker_available = False
 
     def _check_gpu_capability(self):
-        """Checks if Docker supports nvidia runtime passthrough."""
+        """Detect NVIDIA GPU support: the classic `nvidia` runtime OR CDI
+        devices (Docker Desktop / newer toolkits expose GPUs via CDI without
+        registering an 'nvidia' runtime)."""
         if not self.docker_available or not self.client:
             return
 
         try:
             info = self.client.info()
-            runtimes = info.get("Runtimes", {})
+            runtimes = info.get("Runtimes", {}) or {}
             if "nvidia" in runtimes:
                 self.gpu_passthrough_available = True
                 logger.info("NVIDIA Container Toolkit detected in Docker runtimes.")
-            else:
+                return
+
+            cdi_specs = _nvidia_cdi_specs()
+            if cdi_specs:
                 self.gpu_passthrough_available = True
-                logger.info("GPU passthrough configured.")
-        except Exception as e:
-            logger.info(f"NVIDIA container runtime check: {e}")
+                logger.info("NVIDIA CDI device specs detected (%s).", ", ".join(cdi_specs[:3]))
+                return
+
             self.gpu_passthrough_available = False
+            self.gpu_degraded_reason = (
+                "No 'nvidia' runtime and no NVIDIA CDI device specs found in Docker. "
+                "Install the NVIDIA Container Toolkit to enable GPU passthrough."
+            )
+            logger.warning(self.gpu_degraded_reason)
+        except Exception as e:
+            self.gpu_passthrough_available = False
+            self.gpu_degraded_reason = f"NVIDIA container runtime check failed: {e}"
+            logger.info(self.gpu_degraded_reason)
+
+    # ------------------------------------------------------------------
+    # Container lifecycle
+    # ------------------------------------------------------------------
+
+    def _desired_config_fingerprint(self, workspace_path: str) -> str:
+        payload = {
+            "image": settings.CONTAINER_IMAGE,
+            "shm": settings.SHM_SIZE,
+            "inference_port": settings.INFERENCE_PORT,
+            "hf_home": "/root/.cache/huggingface" if settings.EPHEMERAL_MODE else "/workspace/.hf_cache",
+            "workspace": workspace_path,
+        }
+        blob = json.dumps(payload, sort_keys=True).encode("utf-8")
+        return hashlib.sha256(blob).hexdigest()[:16]
 
     def get_or_create_container(self):
-        """Ensures the sandbox container is running with GPU, 8GB shm, port 8001, and /workspace mount."""
+        """Ensures the sandbox container is running with GPU, 8GB shm, port
+        8001, and /workspace mount. Recreates the container when the desired
+        configuration changed (old container removed; workspace data is on a
+        host volume and survives)."""
         if not self.docker_available or not self.client:
             return None
 
@@ -64,6 +137,8 @@ class DockerSandboxManager:
         if not settings.EPHEMERAL_MODE:
             os.makedirs(hf_cache_path, exist_ok=True)
 
+        desired_fp = self._desired_config_fingerprint(workspace_path)
+
         try:
             try:
                 container = self.client.containers.get(settings.CONTAINER_NAME)
@@ -71,18 +146,27 @@ class DockerSandboxManager:
                     logger.info(f"Starting stopped container {settings.CONTAINER_NAME}...")
                     container.start()
                     container.reload()
-                return container
+                    return container
+
+                labels = container.attrs.get("Config", {}).get("Labels", {}) or {}
+                if labels.get(CONFIG_LABEL) not in (None, desired_fp):
+                    logger.warning(
+                        "Sandbox configuration changed (fingerprint %s -> %s). "
+                        "Recreating container; workspace volume is preserved.",
+                        labels.get(CONFIG_LABEL), desired_fp,
+                    )
+                    try:
+                        container.remove(force=True)
+                    except Exception as rm_err:
+                        logger.error(f"Could not remove outdated container: {rm_err}")
+                        return container
+                    # fall through to creation
+                else:
+                    return container
             except Exception:
                 pass
 
             logger.info(f"Creating sandbox container '{settings.CONTAINER_NAME}' from {settings.CONTAINER_IMAGE}...")
-
-            volumes = {
-                workspace_path: {
-                    "bind": "/workspace",
-                    "mode": "rw"
-                }
-            }
 
             hf_home = "/root/.cache/huggingface" if settings.EPHEMERAL_MODE else "/workspace/.hf_cache"
 
@@ -94,30 +178,19 @@ class DockerSandboxManager:
                 "LC_ALL": "C.UTF-8"
             }
 
+            volumes = {
+                workspace_path: {
+                    "bind": "/workspace",
+                    "mode": "rw"
+                }
+            }
+
             ports = {
                 "8001/tcp": settings.INFERENCE_PORT
             }
 
-            device_requests = None
-            if self.gpu_passthrough_available:
-                device_requests = [
-                    DeviceRequest(count=-1, capabilities=[["gpu", "compute", "utility"]])
-                ]
-
-            container = self.client.containers.run(
-                image=settings.CONTAINER_IMAGE,
-                name=settings.CONTAINER_NAME,
-                command="/bin/bash",
-                stdin_open=True,
-                tty=True,
-                detach=True,
-                working_dir="/workspace",
-                volumes=volumes,
-                environment=environment,
-                ports=ports,
-                shm_size=settings.SHM_SIZE,
-                device_requests=device_requests,
-                restart_policy={"Name": "unless-stopped"}
+            container = self._run_container_with_gpu_fallback(
+                environment=environment, volumes=volumes, ports=ports, config_fp=desired_fp
             )
 
             logger.info(f"Container '{settings.CONTAINER_NAME}' started (ID: {container.short_id}).")
@@ -127,12 +200,59 @@ class DockerSandboxManager:
             logger.error(f"Failed to create/start Docker sandbox: {e}")
             return None
 
+    def _run_container_with_gpu_fallback(self, environment, volumes, ports, config_fp: str):
+        """Try GPU-enabled creation; on daemon rejection fall back to CPU-only
+        with a loud, surfaced warning instead of failing opaquely."""
+        labels = {CONFIG_LABEL: config_fp}
+        common = dict(
+            image=settings.CONTAINER_IMAGE,
+            name=settings.CONTAINER_NAME,
+            command="/bin/bash",
+            stdin_open=True,
+            tty=True,
+            detach=True,
+            working_dir="/workspace",
+            volumes=volumes,
+            environment=environment,
+            ports=ports,
+            shm_size=settings.SHM_SIZE,
+            restart_policy={"Name": "unless-stopped"},
+            labels=labels,
+        )
+        if self.gpu_passthrough_available:
+            try:
+                return self.client.containers.run(
+                    device_requests=[
+                        DeviceRequest(count=-1, capabilities=[["gpu", "compute", "utility"]])
+                    ],
+                    **common,
+                )
+            except Exception as e:
+                self.gpu_passthrough_available = False
+                self.gpu_degraded_reason = (
+                    f"Docker refused GPU device request ({e}). Container started WITHOUT GPU. "
+                    "Check the NVIDIA Container Toolkit installation."
+                )
+                logger.error(self.gpu_degraded_reason)
+                # Remove the half-created container if the daemon left one.
+                try:
+                    stale = self.client.containers.get(settings.CONTAINER_NAME)
+                    stale.remove(force=True)
+                except Exception:
+                    pass
+        else:
+            logger.warning(
+                "Starting container WITHOUT GPU passthrough: %s", self.gpu_degraded_reason or "capability unknown"
+            )
+        return self.client.containers.run(**common)
+
     def get_status(self) -> Dict[str, Any]:
         """Returns the current container and Docker daemon status."""
         hf_cache_location = "/root/.cache/huggingface (ephemeral)" if settings.EPHEMERAL_MODE else "/workspace/.hf_cache"
         status = {
             "docker_available": self.docker_available,
             "gpu_passthrough": self.gpu_passthrough_available,
+            "gpu_degraded_reason": self.gpu_degraded_reason,
             "container_name": settings.CONTAINER_NAME,
             "container_status": "not_running",
             "container_id": None,
@@ -155,7 +275,7 @@ class DockerSandboxManager:
         return status
 
     def restart_container(self) -> bool:
-        """Restarts the sandbox container."""
+        """Restarts the sandbox container (reusing the current config)."""
         if not self.docker_available or not self.client:
             return False
 
@@ -167,70 +287,92 @@ class DockerSandboxManager:
             logger.error(f"Failed to restart container: {e}")
             return False
 
-    def wipe_model_cache(self) -> Dict[str, Any]:
-        """Safely deletes all model cache files from the host workspace to free disk space."""
-        import shutil
-        import stat
+    # ------------------------------------------------------------------
+    # Model cache maintenance
+    # ------------------------------------------------------------------
 
+    def wipe_model_cache(self) -> Dict[str, Any]:
+        """Deletes model cache files from the host workspace, reporting bytes
+        that were actually removed and any entries that failed to delete."""
         hf_cache_path = settings.WORKSPACE_DIR.resolve() / settings.HF_CACHE_DIR_NAME
 
         if not hf_cache_path.exists():
             return {
                 "status": "success",
                 "freed_mb": 0.0,
-                "message": "No model cache found on host disk."
+                "message": "No model cache found on host disk.",
+                "errors": [],
             }
 
-        total_bytes = 0
+        running_warning = ""
         try:
-            for entry in hf_cache_path.rglob("*"):
-                if entry.is_file():
-                    total_bytes += entry.stat().st_size
-        except Exception as e:
-            logger.warning(f"Error calculating cache size: {e}")
+            if self.docker_available and self.client:
+                c = self.client.containers.get(settings.CONTAINER_NAME)
+                if c.status == "running":
+                    running_warning = " Container was running during the wipe; a download in flight may re-create partial files."
+        except Exception:
+            pass
 
-        freed_mb = round(total_bytes / (1024 * 1024), 2)
+        deleted_bytes = 0
+        errors: List[str] = []
 
-        def _remove_readonly(func, path, _):
+        def _rm_error_handler(func, path, _exc):
+            errors.append(str(path))
+
+        use_onexc = _rmtree_supported_kwargs().get("onexc", False)
+
+        def _force_writable(path: Path) -> None:
             try:
                 os.chmod(path, stat.S_IWRITE)
-                func(path)
             except Exception:
                 pass
 
-        try:
-            # Wipe all files and directories inside .hf_cache
-            for item in list(hf_cache_path.iterdir()):
+        for item in list(hf_cache_path.iterdir()):
+            try:
                 if item.is_dir():
-                    shutil.rmtree(item, onerror=_remove_readonly)
+                    before = sum(f.stat().st_size for f in item.rglob("*") if f.is_file())
+                    if use_onexc:
+                        shutil.rmtree(item, onexc=lambda f, p, e: _rm_error_handler(f, p, e))
+                    else:
+                        shutil.rmtree(item, onerror=_rm_error_handler)
+                    if not item.exists():
+                        deleted_bytes += before
                 else:
-                    try:
-                        os.chmod(item, stat.S_IWRITE)
-                    except Exception:
-                        pass
+                    size = item.stat().st_size
+                    _force_writable(item)
                     item.unlink()
+                    deleted_bytes += size
+            except Exception as e:
+                errors.append(f"{item}: {e}")
 
-            # If in ephemeral mode, attempt to remove root .hf_cache directory too
-            if settings.EPHEMERAL_MODE:
-                try:
-                    os.chmod(hf_cache_path, stat.S_IWRITE)
-                    hf_cache_path.rmdir()
-                except Exception:
-                    pass
+        if settings.EPHEMERAL_MODE and not errors:
+            try:
+                _force_writable(hf_cache_path)
+                hf_cache_path.rmdir()
+            except Exception:
+                pass
 
-            logger.info(f"Wiped model cache. Freed {freed_mb} MB.")
+        freed_mb = round(deleted_bytes / (1024 * 1024), 2)
+        if errors:
+            logger.warning("Model cache wipe finished with %d errors: %s", len(errors), errors[:3])
             return {
-                "status": "success",
+                "status": "partial",
                 "freed_mb": freed_mb,
-                "message": f"Successfully freed {freed_mb} MB from host disk."
+                "message": f"Freed {freed_mb} MB; {len(errors)} entries could not be deleted.{running_warning}",
+                "errors": errors[:20],
             }
-        except Exception as e:
-            logger.error(f"Failed to wipe model cache: {e}")
-            return {
-                "status": "error",
-                "freed_mb": 0.0,
-                "message": f"Failed to wipe model cache: {e}"
-            }
+
+        logger.info(f"Wiped model cache. Freed {freed_mb} MB.")
+        return {
+            "status": "success",
+            "freed_mb": freed_mb,
+            "message": f"Successfully freed {freed_mb} MB from host disk.{running_warning}".strip(),
+            "errors": [],
+        }
+
+    # ------------------------------------------------------------------
+    # Interactive exec PTY
+    # ------------------------------------------------------------------
 
     def create_exec_pty(self) -> Optional[Tuple[str, Any]]:
         """
@@ -272,4 +414,3 @@ class DockerSandboxManager:
 
 
 docker_manager = DockerSandboxManager()
-

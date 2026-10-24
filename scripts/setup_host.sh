@@ -2,7 +2,7 @@
 set -e
 
 echo "======================================================="
-echo "  Connect - Remote GPU Development Platform Setup"
+echo "  GConnect - Remote GPU Development Platform Setup"
 echo "======================================================="
 echo ""
 
@@ -28,7 +28,7 @@ echo "[3/3] Checking environment status:"
 if command -v docker &> /dev/null; then
     echo "  - Docker: Detected"
 else
-    echo "  - Docker: Not found (running in local shell fallback mode)"
+    echo "  - Docker: Not found (terminal will show a notice; local fallback is disabled by default)"
 fi
 
 if command -v nvidia-smi &> /dev/null; then
@@ -37,13 +37,19 @@ else
     echo "  - NVIDIA GPU: Driver not found (using simulated telemetry)"
 fi
 
+# Honor the same env vars as the daemon (see .env.example).
+HOST="${CONNECT_HOST:-127.0.0.1}"
+if [ "${CONNECT_ALLOW_LAN:-false}" = "true" ]; then
+    HOST="${CONNECT_HOST:-0.0.0.0}"
+fi
+PORT="${CONNECT_PORT:-8000}"
+
 echo ""
 echo "======================================================="
-echo "  Starting Connect Host Daemon..."
-echo "  Web IDE:             http://0.0.0.0:8000"
-echo "  Inference Stream:    Port 8001 (Forwarded to container)"
+echo "  Starting GConnect Host Daemon..."
+echo "  Web IDE:             http://${HOST}:${PORT}"
+echo "  Inference Stream:    Port ${CONNECT_INFERENCE_PORT:-8001} (Forwarded to container)"
 echo "======================================================="
 echo ""
 
-python3 -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
-
+python3 -m uvicorn backend.main:app --host "$HOST" --port "$PORT" --reload
