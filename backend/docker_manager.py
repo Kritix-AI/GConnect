@@ -149,11 +149,13 @@ class DockerSandboxManager:
                     return container
 
                 labels = container.attrs.get("Config", {}).get("Labels", {}) or {}
-                if labels.get(CONFIG_LABEL) not in (None, desired_fp):
+                if labels.get(CONFIG_LABEL) != desired_fp:
+                    # Also covers containers created before the fingerprint
+                    # existed (no label): they are upgraded/recreated too.
                     logger.warning(
                         "Sandbox configuration changed (fingerprint %s -> %s). "
                         "Recreating container; workspace volume is preserved.",
-                        labels.get(CONFIG_LABEL), desired_fp,
+                        labels.get(CONFIG_LABEL) or "<none>", desired_fp,
                     )
                     try:
                         container.remove(force=True)
@@ -275,17 +277,22 @@ class DockerSandboxManager:
         return status
 
     def restart_container(self) -> bool:
-        """Restarts the sandbox container (reusing the current config)."""
+        """Recreates the sandbox container (remove + create with current
+        config). A plain `docker restart` is NOT enough: after a Docker
+        Desktop restart, GPU containers frequently come back without GPU
+        injection - a full recreate re-runs the nvidia runtime hooks.
+        The workspace is a host volume, so no data is lost."""
         if not self.docker_available or not self.client:
             return False
 
         try:
             container = self.client.containers.get(settings.CONTAINER_NAME)
-            container.restart()
-            return True
-        except Exception as e:
-            logger.error(f"Failed to restart container: {e}")
-            return False
+            container.remove(force=True)
+        except Exception:
+            pass  # not running / already gone - create fresh anyway
+
+        created = self.get_or_create_container()
+        return created is not None
 
     # ------------------------------------------------------------------
     # Model cache maintenance

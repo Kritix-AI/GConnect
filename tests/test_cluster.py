@@ -338,6 +338,41 @@ def test_telemetry_stream_self_heals_when_broadcaster_dead():
     asyncio.run(main())
 
 
+def test_container_reconcile_upgrades_labelless_container(monkeypatch):
+    """Regression: a container created before the config-fingerprint label
+    existed (label missing) used to be reused forever without reconciliation.
+    It must now be removed and recreated so the desired config applies."""
+    from pathlib import Path
+    from unittest.mock import MagicMock
+
+    from backend.config import settings
+    from backend.docker_manager import DockerSandboxManager
+
+    mgr = DockerSandboxManager.__new__(DockerSandboxManager)
+    mgr.docker_available = True
+    mgr.client = MagicMock()
+    mgr.gpu_passthrough_available = False
+    mgr.gpu_degraded_reason = "test"
+
+    legacy = MagicMock()
+    legacy.status = "running"
+    legacy.attrs = {"Config": {"Labels": {}}}  # no dev.gconnect.config label
+    mgr.client.containers.get.return_value = legacy
+
+    monkeypatch.setattr(settings, "WORKSPACE_DIR", Path("D:/some/workspace"), raising=False)
+    monkeypatch.setattr(settings, "EPHEMERAL_MODE", False, raising=False)
+    monkeypatch.setattr(settings, "CONTAINER_IMAGE", "pytorch/pytorch:latest", raising=False)
+    monkeypatch.setattr(settings, "SHM_SIZE", "8g", raising=False)
+    monkeypatch.setattr(settings, "INFERENCE_PORT", 8001, raising=False)
+    monkeypatch.setattr(settings, "CONTAINER_NAME", "connect_dev_sandbox", raising=False)
+
+    mgr.get_or_create_container()
+
+    # The label-less container must have been removed (recreated with labels).
+    legacy.remove.assert_called_once()
+    assert mgr.client.containers.run.called
+
+
 def test_telemetry_concurrent_sampling_never_flips_to_mock():
     """The actual reported failure mode: many concurrent get_snapshot calls
     (broadcaster + snapshot endpoint + cluster status) must never produce a
