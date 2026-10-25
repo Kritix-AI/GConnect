@@ -42,3 +42,11 @@ dist/
 build/
 dist/gconnect-backend*
 src-tauri/binaries/
+
+# Playwright E2E
+playwright-report/
+test-results/
+test-workspace/
+
+# ZCode session artifacts
+.zcode/

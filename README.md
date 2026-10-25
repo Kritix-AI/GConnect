@@ -6,10 +6,10 @@
 
 **Turn any PC with an NVIDIA GPU into your private AI development studio — and pool GPUs from every PC you own into one place.**
 
-[![Version](https://img.shields.io/badge/version-2.1.3-3fb950?style=flat-square)](docs/CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-2.2.0-3fb950?style=flat-square)](docs/CHANGELOG.md)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-58a6ff?style=flat-square)](#-installation)
 [![License: MIT](https://img.shields.io/badge/license-MIT-8b949e?style=flat-square)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-43%20passing-2ea043?style=flat-square)](#-testing)
+[![Tests](https://img.shields.io/badge/tests-53%20backend%20%2B%2015%20E2E-2ea043?style=flat-square)](#-testing)
 [![Security](https://img.shields.io/badge/security%20audit-26%20issues%20fixed-f85149?style=flat-square)](docs/SECURITY_AUDIT.md)
 
 **Desktop App** · **Docker GPU Sandbox** · **Monaco IDE** · **Live Terminal** · **Real-time Telemetry** · **Multi-PC GPU Cluster**
@@ -64,13 +64,17 @@ Run the **GConnect desktop app** (or a lightweight daemon on a headless workstat
 
 | | Feature | Details |
 |---|---|---|
+| 🖥️ | **Desktop app, local OR remote** | Connection screen on first launch: run against **this PC's** sandbox or a **remote GPU workstation** (daemon URL + token) — switch anytime from the header |
 | 📝 | **Monaco Code Editor** | Multi-tab, syntax highlighting for 70+ languages, debounced auto-save, **mtime-based conflict protection** (409 on external changes) |
+| 🚨 | **PROBLEMS Panel** | VS Code-style tab: Python syntax + pyflakes diagnostics as red/yellow squiggles and a clickable problem list (jumps to `file:line`), plus runtime tracebacks parsed from the terminal |
 | 🖥️ | **Interactive Terminal** | Raw Docker exec PTY piped to xterm.js — interactive prompts, `htop`, live `tqdm`, `Ctrl+C`, dynamic resize |
-| 📊 | **Live Telemetry** | 2 Hz NVML sampling, all GPUs, self-healing stream, "NO SIGNAL"/"STALE" honesty indicators |
+| ⚠️ | **Sandbox Status Banner** | Docker down? A yellow banner + Run-dialog tell you *where* and why — scripts never die silently |
+| 📊 | **Live Telemetry** | 2 Hz NVML sampling, all GPUs, self-healing stream, "NO SIGNAL"/"STALE" honesty indicators; **GPU-less machines show CPU + RAM instead** |
 | 🌐 | **GPU Cluster** | Multi-PC node registry, pooled VRAM, per-node/per-GPU stats, live status |
 | 🐳 | **Docker Sandbox** | Auto-created/reconciled container, GPU passthrough, 8 GB shm, port 8001 forwarded for audio streams |
 | 💾 | **Persistent Model Cache** | `HF_HOME=/workspace/.hf_cache` — 9 GB of models download once |
 | 🎵 | **Audio Preview** | Click any `.wav`/`.mp3`/`.ogg`/`.flac` to play it in-app — perfect for TTS output |
+| 📐 | **Resizable Layout** | Draggable sidebar (double-click resets) and editor/terminal split — VS Code-style |
 | 📦 | **One-click Export** | Download files or the whole workspace as a streamed ZIP |
 | 🔐 | **Secure by Default** | Token auth everywhere, loopback-only binding, no CORS wildcards — [full audit](docs/SECURITY_AUDIT.md) |
 | 🖴️ | **System Tray** | Desktop app runs in the tray: open IDE, copy URL, restart daemon, quit |
@@ -99,11 +103,12 @@ Run the **GConnect desktop app** (or a lightweight daemon on a headless workstat
 
 **Prerequisites:** Windows 10/11 (macOS/Linux: build from source), Docker Desktop *optional* (app degrades gracefully without it).
 
-1. Download **`GConnect_2.1.0_x64-setup.exe`** from [Releases](https://github.com/Kritix-AI/GConnect/releases) *(or build it — see below)*
+1. **The ready-made installer sits right at the repository root:** **[`GConnect_2.2.0_x64-setup.exe`](GConnect_2.2.0_x64-setup.exe)** — download it from there or from [Releases](https://github.com/Kritix-AI/GConnect/releases) *(or build it yourself — see [Building from Source](#️-building-from-source))*
 2. Run the installer — no admin rights needed
 3. Launch **GConnect**
 
 That's it. The app:
+- asks **where to run**: this PC (local Docker sandbox) or a remote GPU workstation (URL + token)
 - starts its private daemon on a free loopback port (skips 8001 — reserved for inference)
 - auto-generates an auth token and passes it to the UI securely (IPC, never localStorage)
 - creates its workspace at `%APPDATA%\com.gconnect.app\workspace`
@@ -116,7 +121,6 @@ Run the daemon on a headless/remote GPU machine and connect from any browser.
 **Windows:**
 ```cmd
 scripts\setup_host.bat                      :: console mode
-scripts\start_tray.bat                      :: silent system-tray mode
 ```
 
 **Linux / macOS:**
@@ -330,17 +334,24 @@ Why not exactly Task Manager's number? Sampling moments differ by a second and V
 ## 🧪 Testing
 
 ```bash
+# Backend / API suite (Python)
 pip install -r backend/requirements.txt
-pytest tests/ -v
+pytest tests/ -v            # or: npm run test:backend
+
+# End-to-end suite (real browser against a real disposable daemon)
+npm install
+npm run test:e2e            # add :headed to watch the browser
 ```
 
-**43 tests**, all running against isolated temp workspaces (they can never touch your real files or model cache):
+**53 backend tests + 15 E2E tests**, all against isolated temp workspaces (they can never touch your real files or model cache):
 
-- Auth: 401s, token via header/query, cross-origin rejection, public health, docs disabled, loopback default
+- Auth: 401s, token via header/query, cross-origin rejection, Tauri-origin CORS grant, public health, docs disabled, loopback default
 - Files: lifecycle, traversal matrix (save/read/delete/raw/download/rename), mtime conflicts (409), atomic writes, size caps, symlink skipping, streaming ZIP
+- Lint: `/api/lint` syntax errors, pyflakes severities, oversized-content rejection
+- Telemetry: NVML thread-safety, last-good cache, degraded flag, utilization convention, broadcaster self-healing, CPU/RAM host fallback payload
 - Cluster: registry CRUD + persistence, token masking, offline-node handling, API flows
-- Telemetry: NVML thread-safety (1,600-call stress), last-good cache, degraded flag, utilization convention, broadcaster self-healing
 - Docker: GPU capability detection, config fingerprint reconciliation
+- E2E (Chromium): auth overlay, file create/edit/autosave/rename/delete, audio modal, telemetry mode (GPU vs CPU/RAM), Docker-banner warning + Run dialog, PROBLEMS tab (lint entries + click-through), cluster panel, sidebar resize
 
 ---
 
@@ -352,9 +363,7 @@ pytest tests/ -v
 git clone https://github.com/Kritix-AI/GConnect.git
 cd GConnect
 
-npm install                      # Tauri CLI
-python scripts/make_icon.py      # one-time: master icon (committed)
-npx tauri icon src-tauri/app-icon.png   # one-time: icon set (committed)
+npm install                      # Tauri CLI + Playwright
 
 python scripts/build_sidecar.py  # build the daemon sidecar (PyInstaller)
 
@@ -362,7 +371,7 @@ npm run dev                      # development (hot reload)
 npm run build                    # production installer (NSIS on Windows)
 ```
 
-**Output:** `src-tauri/target/release/bundle/nsis/GConnect_<version>_x64-setup.exe`
+**Output:** `src-tauri/target/release/bundle/nsis/GConnect_<version>_x64-setup.exe` — the release copy at the repository root comes from this build.
 
 macOS/Linux: identical commands; the sidecar script auto-detects the Rust target triple. Extend `bundle.targets` in [`tauri.conf.json`](src-tauri/tauri.conf.json) for `dmg`/`appimage`/`deb`.
 
@@ -374,8 +383,8 @@ macOS/Linux: identical commands; the sidecar script auto-detects the Rust target
 | `npm run dev` | Desktop app in dev mode |
 | `npm run build` | Release installer |
 | `npm run sidecar` | Build/rebuild the daemon sidecar |
-| `npm run icon` | Regenerate the master icon |
 | `npm run test:backend` | Run the Python test suite |
+| `npm run test:e2e` | Run the Playwright browser suite |
 | `python scripts/build_sidecar.py --clean` | Remove sidecar build artifacts |
 
 </details>
@@ -449,29 +458,34 @@ The remote PC must run its daemon with `CONNECT_ALLOW_LAN=true` and you must add
 
 ```
 GConnect/
+├── GConnect_2.2.0_x64-setup.exe  # ← ready-made Windows installer (start here)
 ├── backend/                 # FastAPI daemon (Python)
-│   ├── auth.py              #   token auth + origin policy
+│   ├── auth.py              #   token auth + origin policy + Tauri CORS
 │   ├── cluster_manager.py   #   multi-PC GPU cluster
-│   ├── gpu_telemetry.py     #   NVML sampling + WS broadcaster
+│   ├── gpu_telemetry.py     #   NVML sampling + WS broadcaster + CPU/RAM fallback
+│   ├── linter.py            #   /api/lint (ast + pyflakes) for PROBLEMS
 │   ├── docker_manager.py    #   sandbox lifecycle + config reconcile
 │   ├── file_manager.py      #   file APIs (traversal-safe, atomic)
 │   ├── pty_bridge.py        #   WebSocket <-> container PTY
 │   └── main.py              #   app wiring
 ├── frontend/                # IDE (vanilla JS, fully offline)
-│   ├── index.html           #   layout + modals
+│   ├── index.html           #   layout + modals (connection, cluster, problems)
 │   ├── css/                 #   GitHub-dark theme
-│   ├── js/                  #   auth, editor, terminal, cluster, telemetry
+│   ├── js/                  #   auth, editor, terminal, problems, cluster, telemetry
 │   └── vendor/              #   Monaco 0.45, xterm 5.3, Lucide (pinned)
 ├── src-tauri/               # Desktop app (Rust)
-│   ├── src/main.rs          #   sidecar lifecycle, tray, IPC commands
+│   ├── src/main.rs          #   connection modes, sidecar lifecycle, tray, IPC
 │   ├── tauri.conf.json      #   CSP, window, bundle config
 │   └── capabilities/        #   minimal permissions (core:default)
-├── scripts/                 # setup_host, build_sidecar, make_icon, tray_app
-├── tests/                   # 43 tests (conftest isolates everything)
+├── packaging/               # PyInstaller sidecar build
+│   ├── backend_entry.py     #   sidecar entrypoint
+│   └── gconnect_backend.spec#   spec (SPECPATH-relative, CWD-independent)
+├── scripts/                 # setup_host (win/linux), build_sidecar
+├── tests/                   # 53 backend tests (conftest isolates everything)
+├── e2e/                     # 15 Playwright tests + webServer config
+├── playwright.config.js     # boots a disposable daemon on :8900 per run
 ├── workspace/               # your files (mounted into the container)
 │   └── cluster/             #   Ray + torchrun distributed helpers
-├── backend_entry.py         # sidecar entrypoint
-├── gconnect_backend.spec    # PyInstaller spec
 ├── docs/                    # SECURITY_AUDIT.md, CHANGELOG.md
 └── .env.example             # all configuration, annotated
 ```

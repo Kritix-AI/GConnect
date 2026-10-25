@@ -226,6 +226,26 @@ def test_telemetry_snapshot_shape(authed_client):
     assert "is_mock" in data
     assert "gpus" in data
     assert "gpu_name" in data and "temperature_c" in data
+    # CPU/RAM fallback payload: present on every snapshot so the UI can
+    # replace the GPU bar on machines without an NVIDIA GPU.
+    assert "host" in data
+
+
+def test_telemetry_host_fallback_fields():
+    """No-GPU machines must still report real CPU/RAM numbers (psutil)."""
+    from backend.gpu_telemetry import gpu_telemetry_service, HAS_PSUTIL
+
+    snap = gpu_telemetry_service.get_snapshot()
+    if not HAS_PSUTIL:
+        assert snap["host"] == {}
+        return
+
+    host = snap["host"]
+    assert host["name"]
+    assert host["cores"] >= 1
+    assert host["ram_total_mb"] > 0
+    assert 0 <= host["ram_used_mb"] <= host["ram_total_mb"]
+    assert 0 <= host["ram_percent"] <= 100
 
 
 # ----------------------------------------------------------------------

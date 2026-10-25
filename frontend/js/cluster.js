@@ -98,13 +98,20 @@ class ClusterManager {
         ? '<span class="cluster-dot online" title="online"></span>'
         : '<span class="cluster-dot offline" title="offline"></span>';
 
+      const host = node.host || {};
+      const hostLine = host.ram_total_mb
+        ? `${escapeHtml(host.name || "CPU")} · CPU ${host.percent ?? 0}% · RAM ${(host.ram_used_mb / 1024).toFixed(1)}/${(host.ram_total_mb / 1024).toFixed(1)} GB`
+        : "";
+
       const gpus = node.gpus && node.gpus.length
         ? node.gpus.map((g) =>
             `${escapeHtml(g.name)} · ${(g.vram_used_mb / 1024).toFixed(1)}/${(g.vram_total_mb / 1024).toFixed(1)} GB · ${g.gpu_utilization_percent}% · ${g.temperature_c}°C`
           ).join("<br>")
         : node.telemetry_degraded
           ? "GPU detected but sensor could not be read (no signal)"
-          : node.telemetry_is_mock ? "No GPU detected" : "";
+          : node.telemetry_is_mock
+            ? (hostLine || "No GPU detected")
+            : "";
 
       const vramPct = Math.min(Math.max(node.vram_percent || 0, 0), 100);
 

@@ -1,5 +1,68 @@
 # GConnect Changelog
 
+## 2.2.0 (2026-10-25) - Desktop remote mode, PROBLEMS panel, editor linting, honest host telemetry
+
+### Desktop app: connect to a REMOTE GPU workstation
+- The windowed app is no longer limited to the local machine. First launch
+  shows a **connection screen**: "This PC" (local sidecar sandbox) or
+  "Remote GPU PC" (daemon URL + token). The choice persists in
+  `connection.json`; a header **Connection** button switches anytime.
+- Rust shell: persisted connection config, `set_connection` IPC, remote
+  reachability probe, mode-aware `backend_info`. Fresh installs create the
+  app-data dir on first save (the picker previously failed silently there).
+- Backend: CORS grant scoped to the Tauri webview origins only (preflight +
+  response headers) so the webview can talk to a remote daemon; every other
+  cross-origin caller stays rejected. CSP widened to remote http/ws hosts +
+  media streaming.
+
+### PROBLEMS tab (VS Code-style) + editor linting
+- New bottom-panel tabs: TERMINAL / **PROBLEMS** with a red count badge.
+- **Editor diagnostics**: `/api/lint` runs `ast.parse` (syntax errors) and
+  **pyflakes** (undefined names, unused imports, ...) on the editor content.
+  Results drive red/yellow Monaco squiggles AND clickable Problems entries
+  (file:line click-through jumps to the line). Debounced on typing and tab
+  switch; non-Python files are skipped.
+- **Runtime errors**: Python tracebacks are parsed from the terminal stream
+  (ANSI-stripped, chained frames handled) into the same list under
+  "Terminal output". A new `python` run clears only runtime entries.
+- Grouped per file, warning vs error icons, entries sync on file
+  rename/delete.
+
+### Honest host telemetry (no-GPU machines)
+- Machines without an NVIDIA GPU now show **CPU + RAM** in the telemetry bar
+  (psutil; CPU model from registry/procfs) instead of a zeroed GPU panel.
+  TEMP slot hidden; NO GPU badge stays. Real GPUs still show GPU stats.
+- Cluster panel: GPU-less nodes list CPU/RAM instead of "No GPU detected".
+
+### Docker-unavailable handling
+- Yellow banner under the header when Docker/sandbox is down (10s polling,
+  Retry + dismiss, remote-vs-local wording); **Run Script** pops a clear
+  "Sandbox Not Available" dialog instead of silently sending commands into a
+  dead terminal. Terminal WS closes with code 4500 so the client stops
+  reconnect-looping and shows a "No Sandbox" badge.
+
+### IDE polish
+- **Resizable sidebar** (150-520px, double-click resets) with VS Code-style
+  divider.
+- Scroll containment (`overscroll-behavior`): scrolling the terminal or file
+  tree can no longer push the editor tabs/header out of view.
+- Immutable-lifecycle fixes: connection errors are now surfaced in the modal
+  instead of a hidden div.
+
+### Repo / packaging
+- Build files classified: `backend_entry.py` + `gconnect_backend.spec` moved
+  to `packaging/` (SPECPATH-relative, CWD-independent build).
+- Ready-made Windows installer published at the repo root
+  (`GConnect_2.2.0_x64-setup.exe`).
+- Legacy tray app removed (`scripts/tray_app.py`, `start_tray.bat`,
+  `make_icon.py`; `pystray`/`Pillow` dropped) - superseded by the desktop app.
+- Playwright **E2E suite** added (`e2e/`, `npm run test:e2e`): auth flows,
+  IDE file lifecycle, telemetry mode, Docker-banner warning, PROBLEMS,
+  cluster panel, sidebar resize. Backend suite grew to **53 tests** (lint +
+  CORS + host telemetry), E2E **15 tests**.
+- Dependencies: `psutil`, `pyflakes` added; `pystray`/`Pillow` removed.
+
+
 ## 2.1.3 (2026-10-24) — Realtime self-healing telemetry stream
 
 **Reported:** "abhi bhi correct data show nahi kar raha aur realtime mein bhi

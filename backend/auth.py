@@ -14,9 +14,9 @@ import logging
 import os
 import secrets
 from pathlib import Path
-from typing import Optional
+from typing import Dict, Optional
 
-from fastapi import HTTPException, Request, WebSocket
+from fastapi import HTTPException, Request, Response, WebSocket
 from fastapi.responses import JSONResponse
 
 from backend.config import settings
@@ -37,6 +37,14 @@ PUBLIC_PATH_PREFIXES = (
     "/api/health",
 )
 PUBLIC_PATHS = {"/", "/favicon.ico", "/index.html"}
+
+# CORS grant for the bundled desktop webview only. The webview's origin
+# (tauri://localhost / http://tauri.localhost) is not same-origin with a
+# remote daemon, so without these headers WebView2 blocks every cross-origin
+# fetch (Authorization header -> preflight) before the app sees a response.
+# Every other cross-origin caller stays rejected below.
+CORS_ALLOW_HEADERS = "Authorization, Content-Type"
+CORS_ALLOW_METHODS = "GET, POST, DELETE, OPTIONS"
 
 _token: Optional[str] = None
 
@@ -114,25 +122,48 @@ def _origin_allowed(request: Request) -> bool:
         return False
 
 
+def _tauri_cors_headers(origin: str) -> Dict[str, str]:
+    return {
+        "Access-Control-Allow-Origin": origin,
+        "Access-Control-Allow-Headers": CORS_ALLOW_HEADERS,
+        "Access-Control-Allow-Methods": CORS_ALLOW_METHODS,
+    }
+
+
 async def enforce_http_auth(request: Request, call_next):
     path = request.url.path
 
     if path in PUBLIC_PATHS or path.startswith(PUBLIC_PATH_PREFIXES):
         return await call_next(request)
 
-    if _origin_allowed(request) is False:
-        logger.warning("Rejected cross-origin request to %s from %s", path, request.headers.get("origin"))
+    origin = request.headers.get("origin", "")
+    is_tauri = origin in TAURI_ORIGINS
+
+    if origin and not is_tauri and _origin_allowed(request) is False:
+        logger.warning("Rejected cross-origin request to %s from %s", path, origin)
         return JSONResponse(status_code=403, content={"detail": "Cross-origin request forbidden."})
 
+    # Preflight from the desktop webview: answer before any handler runs.
+    if is_tauri and request.method == "OPTIONS":
+        return Response(status_code=204, headers=_tauri_cors_headers(origin))
+
     if not auth_enabled():
-        return await call_next(request)
+        response = await call_next(request)
+        if is_tauri:
+            for k, v in _tauri_cors_headers(origin).items():
+                response.headers.append(k, v)
+        return response
 
     supplied = _request_token(request)
     expected = get_token()
     if not supplied or not hmac.compare_digest(supplied, expected):
         return JSONResponse(status_code=401, content={"detail": "Authentication required."})
 
-    return await call_next(request)
+    response = await call_next(request)
+    if is_tauri:
+        for k, v in _tauri_cors_headers(origin).items():
+            response.headers.append(k, v)
+    return response
 
 
 async def authorize_websocket(websocket: WebSocket) -> bool:

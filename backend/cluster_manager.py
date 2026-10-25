@@ -141,6 +141,7 @@ class ClusterManager:
             "temperature_c": snap["temperature_c"],
             "telemetry_is_mock": snap["is_mock"],
             "telemetry_degraded": snap.get("degraded", False),
+            "host": snap.get("host", {}),
             "container_status": container.get("container_status"),
             "gpu_passthrough": container.get("gpu_passthrough"),
         }
@@ -161,6 +162,7 @@ class ClusterManager:
             "temperature_c": 0,
             "telemetry_is_mock": True,
             "telemetry_degraded": False,
+            "host": {},
             "container_status": "unknown",
             "gpu_passthrough": False,
             "error": None,
@@ -193,6 +195,7 @@ class ClusterManager:
                     "temperature_c": snap.get("temperature_c", 0),
                     "telemetry_is_mock": snap.get("is_mock", True),
                     "telemetry_degraded": snap.get("degraded", False),
+                    "host": snap.get("host", {}),
                     "container_status": cont.get("container_status", "unknown"),
                     "gpu_passthrough": cont.get("gpu_passthrough", False),
                     "error": None,

@@ -803,3 +803,286 @@ body.dark-theme {
   line-height: 1.5;
 }
 
+
+/* Connection screen (local sandbox vs remote GPU workstation) */
+
+.connection-modal-card {
+  width: 460px;
+}
+
+.connection-choices {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.connection-choice {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 14px;
+  background-color: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  color: var(--text-main);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.connection-choice:hover {
+  border-color: var(--accent-blue);
+  background-color: var(--bg-tertiary);
+}
+
+.connection-choice-icon {
+  width: 20px;
+  height: 20px;
+  color: var(--accent-blue);
+}
+
+.connection-choice-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-bright);
+}
+
+.connection-choice-desc {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.connection-form .modal-input {
+  margin-bottom: 10px;
+}
+
+.connection-error {
+  font-size: 12px;
+  color: var(--accent-red);
+  margin-bottom: 10px;
+  line-height: 1.4;
+}
+
+.connection-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 12px;
+  line-height: 1.5;
+}
+
+/* Scroll containment (VS Code-like fixed chrome): an overflow:hidden box is
+   still a scroll container, so wheel-scrolling the terminal past its top
+   chained up and scrolled .workspace-viewport itself - hiding the editor
+   tabs under the header. Contain every pane's overscroll. */
+html, body {
+  overscroll-behavior: none;
+}
+
+.app-body, .workspace-viewport {
+  overscroll-behavior: none;
+}
+
+.xterm-container, .xterm .xterm-viewport,
+.file-tree-container, .monaco-container {
+  overscroll-behavior: contain;
+}
+
+/* Docker / sandbox availability banner (below the header) */
+.docker-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 16px;
+  background-color: rgba(210, 153, 34, 0.12);
+  border-bottom: 1px solid var(--accent-amber);
+  color: var(--accent-amber);
+  font-size: 12px;
+}
+
+.docker-banner.hidden {
+  display: none;
+}
+
+.docker-banner-icon {
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+}
+
+.docker-banner-text {
+  flex: 1;
+}
+
+.docker-banner button {
+  flex-shrink: 0;
+}
+
+.connection-status.warning {
+  background-color: rgba(210, 153, 34, 0.15);
+  color: var(--accent-amber);
+  border: 1px solid rgba(210, 153, 34, 0.4);
+}
+
+/* VS Code-style bottom panel tabs (TERMINAL / PROBLEMS) */
+
+.panel-tabs {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  height: 100%;
+}
+
+.panel-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-muted);
+  font-size: 11px;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+}
+
+.panel-tab:hover {
+  color: var(--text-bright);
+}
+
+.panel-tab.active {
+  color: var(--text-bright);
+  border-bottom-color: var(--accent-blue);
+}
+
+.panel-tab .tab-icon {
+  width: 13px;
+  height: 13px;
+}
+
+.panel-tab .connection-status {
+  margin-left: 2px;
+}
+
+.problem-count {
+  min-width: 16px;
+  text-align: center;
+  background-color: rgba(248, 81, 73, 0.2);
+  color: var(--accent-red);
+  border-radius: 8px;
+  padding: 0 6px;
+  font-size: 10px;
+  letter-spacing: 0;
+}
+
+.problems-container {
+  flex: 1;
+  width: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 4px 0;
+  background-color: var(--bg-primary);
+  font-size: 12px;
+}
+
+.problems-empty {
+  padding: 16px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.problems-note {
+  padding: 4px 14px;
+  color: var(--accent-amber);
+  font-size: 11px;
+}
+
+.problem-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 5px 14px;
+  cursor: pointer;
+}
+
+.problem-item:hover {
+  background-color: var(--bg-tertiary);
+}
+
+.problem-item .p-icon {
+  width: 13px;
+  height: 13px;
+  color: var(--accent-red);
+  flex-shrink: 0;
+  transform: translateY(2px);
+}
+
+.problem-msg {
+  color: var(--text-main);
+  word-break: break-word;
+}
+
+.problem-meta {
+  margin-left: auto;
+  flex-shrink: 0;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+/* Draggable sidebar resizer */
+
+.sidebar-resizer {
+  width: 5px;
+  flex-shrink: 0;
+  cursor: col-resize;
+  position: relative;
+  background: transparent;
+  z-index: 5;
+}
+
+.sidebar-resizer .resizer-handle {
+  position: absolute;
+  left: 2px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background-color: var(--border-color);
+}
+
+.sidebar-resizer:hover .resizer-handle,
+.sidebar-resizer.dragging .resizer-handle {
+  width: 2px;
+  background-color: var(--accent-blue);
+}
+
+/* PROBLEMS tab: per-file group headers + warning severity */
+.problem-file {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 14px 3px;
+  color: var(--text-bright);
+  font-size: 11px;
+  border-top: 1px solid var(--border-color);
+}
+
+.problem-file:first-child {
+  border-top: none;
+}
+
+.problem-file-count {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.problem-item {
+  padding-left: 28px;
+}
+
+.problem-item .p-icon.warning {
+  color: var(--accent-amber);
+}

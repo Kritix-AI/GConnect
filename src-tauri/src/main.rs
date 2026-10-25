@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Manager, RunEvent};
@@ -17,8 +17,32 @@ use tauri_plugin_shell::ShellExt;
 /// Everything the webview needs to reach the daemon.
 #[derive(Serialize, Clone)]
 struct BackendInfo {
-    port: u16,
+    mode: String, // "local" | "remote" | "unconfigured"
+    url: String,  // daemon base URL ("" until a connection is configured)
     token: String,
+    port: u16,
+    online: bool,
+}
+
+/// Persisted connection choice (app_data_dir/connection.json).
+/// `mode: "unconfigured"` (missing file) shows the connection screen.
+#[derive(Deserialize, Serialize, Clone)]
+struct ConnectionConfig {
+    mode: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    token: Option<String>,
+}
+
+impl Default for ConnectionConfig {
+    fn default() -> Self {
+        Self {
+            mode: "unconfigured".into(),
+            url: None,
+            token: None,
+        }
+    }
 }
 
 struct BackendState {
@@ -150,7 +174,13 @@ fn start_backend(app: &AppHandle) -> Result<BackendInfo, String> {
         return Err("daemon did not publish an auth token".into());
     }
 
-    let info = BackendInfo { port, token };
+    let info = BackendInfo {
+        mode: "local".into(),
+        url: format!("http://127.0.0.1:{port}"),
+        token,
+        port,
+        online: true,
+    };
     *app.state::<BackendState>().info.lock().unwrap() = Some(info.clone());
     *app.state::<BackendState>().child.lock().unwrap() = Some(child);
 
@@ -172,12 +202,114 @@ fn kill_backend(app: &AppHandle) {
 }
 
 // ----------------------------------------------------------------------
+// Connection mode (local sidecar vs remote GPU workstation)
+// ----------------------------------------------------------------------
+
+fn connection_file(app: &AppHandle) -> Result<PathBuf, String> {
+    let base = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("app data dir unavailable: {e}"))?;
+    Ok(base.join("connection.json"))
+}
+
+fn load_connection(app: &AppHandle) -> ConnectionConfig {
+    let Ok(path) = connection_file(app) else {
+        return ConnectionConfig::default();
+    };
+    match std::fs::read_to_string(path) {
+        Ok(text) => serde_json::from_str(&text).unwrap_or_default(),
+        Err(_) => ConnectionConfig::default(),
+    }
+}
+
+fn save_connection(app: &AppHandle, cfg: &ConnectionConfig) -> Result<(), String> {
+    let path = connection_file(app)?;
+    // Fresh installs (and the picker itself) run before data_dirs() ever
+    // created the app-data folder - create it or the first choice fails.
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("cannot create app data dir: {e}"))?;
+    }
+    let text = serde_json::to_string_pretty(cfg).map_err(|e| e.to_string())?;
+    std::fs::write(&path, text).map_err(|e| format!("cannot save connection: {e}"))
+}
+
+fn unconfigured_info() -> BackendInfo {
+    BackendInfo {
+        mode: "unconfigured".into(),
+        url: String::new(),
+        token: String::new(),
+        port: 0,
+        online: false,
+    }
+}
+
+fn normalize_remote_url(raw: &str) -> Result<String, String> {
+    let url = raw.trim().trim_end_matches('/').to_string();
+    let lower = url.to_lowercase();
+    if !lower.starts_with("http://") && !lower.starts_with("https://") {
+        return Err("URL must start with http:// or https://".into());
+    }
+    let scheme_len = lower.find("://").unwrap() + 3;
+    if url.len() <= scheme_len {
+        return Err("URL has no host".into());
+    }
+    Ok(url)
+}
+
+/// Best-effort liveness probe against the remote daemon's public /api/health.
+/// Plain TCP for http URLs; https is assumed reachable (verifying TLS without
+/// a dependency is out of scope - real errors surface in the UI via fetches).
+fn remote_reachable(url: &str) -> bool {
+    let lower = url.to_lowercase();
+    if lower.starts_with("https://") {
+        return true;
+    }
+    let rest = &url[7..]; // strip http://
+    let host_port = rest.split('/').next().unwrap_or("");
+    if host_port.is_empty() {
+        return false;
+    }
+    let addr = if host_port.contains(':') {
+        host_port.to_string()
+    } else {
+        format!("{host_port}:80")
+    };
+    let Ok(mut stream) = TcpStream::connect(&addr) else {
+        return false;
+    };
+    let _ = stream.set_read_timeout(Some(Duration::from_millis(2000)));
+    let request = format!("GET /api/health HTTP/1.0\r\nHost: {host_port}\r\nConnection: close\r\n\r\n");
+    if stream.write_all(request.as_bytes()).is_err() {
+        return false;
+    }
+    let mut buf = [0u8; 128];
+    let n = stream.read(&mut buf).unwrap_or(0);
+    let head = String::from_utf8_lossy(&buf[..n]);
+    head.starts_with("HTTP/1.") && head.contains(" 200")
+}
+
+/// Points the app at a remote daemon and probes it once.
+fn apply_remote(app: &AppHandle, url: &str, token: &str) -> BackendInfo {
+    let info = BackendInfo {
+        mode: "remote".into(),
+        url: url.to_string(),
+        token: token.to_string(),
+        port: 0,
+        online: remote_reachable(url),
+    };
+    *app.state::<BackendState>().info.lock().unwrap() = Some(info.clone());
+    info
+}
+
+// ----------------------------------------------------------------------
 // IPC commands (the ONLY bridge the webview gets)
 // ----------------------------------------------------------------------
 
 #[tauri::command]
 fn backend_info(app: AppHandle) -> Result<BackendInfo, String> {
-    // The daemon may still be starting; block briefly rather than failing.
+    // Local mode may still be starting (sidecar cold start); block briefly
+    // rather than failing. Remote/unconfigured modes set info at startup.
     let deadline = Instant::now() + Duration::from_secs(50);
     loop {
         if let Some(info) = app.state::<BackendState>().info.lock().unwrap().clone() {
@@ -196,8 +328,70 @@ fn backend_url(app: AppHandle) -> Result<String, String> {
     let guard = state.info.lock().unwrap();
     guard
         .clone()
-        .map(|i| format!("http://127.0.0.1:{}", i.port))
+        .map(|i| i.url)
+        .filter(|u| !u.is_empty())
         .ok_or_else(|| "backend daemon is not available".into())
+}
+
+/// Persists and activates the connection choice. Returns the new BackendInfo
+/// (remote mode is probed synchronously so the UI can warn about an
+/// unreachable host; local mode spawns the sidecar in the background and the
+/// reloaded webview waits for it via backend_info).
+#[tauri::command]
+fn set_connection(app: AppHandle, cfg: ConnectionConfig) -> Result<BackendInfo, String> {
+    let mut persisted = cfg;
+
+    match persisted.mode.as_str() {
+        "local" => {
+            persisted.url = None;
+            persisted.token = None;
+        }
+        "remote" => {
+            let url = persisted
+                .url
+                .as_deref()
+                .map(str::trim)
+                .filter(|u| !u.is_empty())
+                .ok_or("Remote mode requires the daemon URL")?;
+            let url = normalize_remote_url(url)?;
+            let token = persisted
+                .token
+                .as_deref()
+                .map(str::trim)
+                .filter(|t| !t.is_empty())
+                .ok_or("Remote mode requires the daemon token")?
+                .to_string();
+            persisted.url = Some(url);
+            persisted.token = Some(token);
+        }
+        _ => return Err("mode must be 'local' or 'remote'".into()),
+    }
+
+    save_connection(&app, &persisted)?;
+
+    // Stop any running sidecar, clear state, bring up the new mode.
+    kill_backend(&app);
+    *app.state::<BackendState>().info.lock().unwrap() = None;
+
+    match persisted.mode.as_str() {
+        "remote" => Ok(apply_remote(
+            &app,
+            persisted.url.as_deref().unwrap(),
+            persisted.token.as_deref().unwrap(),
+        )),
+        _ => {
+            let handle = app.clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                if let Err(err) = start_backend(&handle) {
+                    eprintln!("[GConnect] backend start failed: {err}");
+                }
+            });
+            Ok(BackendInfo {
+                mode: "local".into(),
+                ..unconfigured_info()
+            })
+        }
+    }
 }
 
 #[tauri::command]
@@ -232,7 +426,7 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
             }
             "url" => {
                 if let Some(info) = app.state::<BackendState>().info.lock().unwrap().clone() {
-                    let _ = set_clipboard_text(&format!("http://127.0.0.1:{}", info.port));
+                    let _ = set_clipboard_text(&info.url);
                 }
             }
             "restart" => {
@@ -319,14 +513,34 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             backend_info,
             backend_url,
-            restart_backend
+            restart_backend,
+            set_connection
         ])
         .setup(|app| {
             let handle = app.handle().clone();
-            // Start the daemon off the startup path so the window shows fast.
+            // Start the backend off the startup path so the window shows fast.
             tauri::async_runtime::spawn_blocking(move || {
-                if let Err(err) = start_backend(&handle) {
-                    eprintln!("[GConnect] backend start failed: {err}");
+                let cfg = load_connection(&handle);
+                match cfg.mode.as_str() {
+                    "remote" => match (cfg.url.as_deref(), cfg.token.as_deref()) {
+                        (Some(url), Some(token)) => {
+                            apply_remote(&handle, url, token);
+                        }
+                        _ => {
+                            // Corrupt config: fall back to the connection screen.
+                            *handle.state::<BackendState>().info.lock().unwrap() =
+                                Some(unconfigured_info());
+                        }
+                    },
+                    "local" => {
+                        if let Err(err) = start_backend(&handle) {
+                            eprintln!("[GConnect] backend start failed: {err}");
+                        }
+                    }
+                    _ => {
+                        *handle.state::<BackendState>().info.lock().unwrap() =
+                            Some(unconfigured_info());
+                    }
                 }
             });
 

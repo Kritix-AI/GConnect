@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-SPEC_FILE = REPO_ROOT / "gconnect_backend.spec"
+SPEC_FILE = REPO_ROOT / "packaging" / "gconnect_backend.spec"
 BINARIES_DIR = REPO_ROOT / "src-tauri" / "binaries"
 EXE_NAME = "gconnect-backend"
 
@@ -58,7 +58,10 @@ def main() -> int:
     )
 
     subprocess.run(
-        [sys.executable, "-m", "PyInstaller", str(SPEC_FILE), "--noconfirm"],
+        [sys.executable, "-m", "PyInstaller", str(SPEC_FILE),
+         "--noconfirm",
+         "--distpath", str(REPO_ROOT / "dist"),
+         "--workpath", str(REPO_ROOT / "build")],
         cwd=REPO_ROOT,
         check=True,
     )

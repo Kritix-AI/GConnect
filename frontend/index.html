@@ -49,7 +49,7 @@
         </div>
 
         <div class="telemetry-metric">
-          <span class="metric-label">VRAM</span>
+          <span class="metric-label" id="vramMetricLabel">VRAM</span>
           <div class="vram-meter-container">
             <div class="vram-meter-fill" id="vramBar" style="width: 0%;"></div>
           </div>
@@ -57,11 +57,11 @@
         </div>
 
         <div class="telemetry-metric">
-          <span class="metric-label">UTILIZATION</span>
+          <span class="metric-label" id="loadMetricLabel">UTILIZATION</span>
           <span class="metric-value" id="gpuLoadValue">0%</span>
         </div>
 
-        <div class="telemetry-metric">
+        <div class="telemetry-metric" id="tempMetric">
           <span class="metric-label">TEMP</span>
           <span class="metric-value" id="gpuTempValue">0°C</span>
         </div>
@@ -75,6 +75,11 @@
 
     <!-- Actions & Run Controls -->
     <div class="header-right">
+      <button class="btn btn-secondary btn-sm" id="btnConnection" title="Switch between this PC and a remote GPU workstation">
+        <i data-lucide="plug-zap"></i>
+        <span>Connection</span>
+      </button>
+
       <button class="btn btn-secondary btn-sm" id="btnCluster" title="GPU Cluster: connect GConnect daemons on other PCs and pool their GPUs">
         <i data-lucide="network"></i>
         <span id="clusterBtnLabel">Cluster</span>
@@ -92,6 +97,20 @@
       </button>
     </div>
   </header>
+
+  <!-- Sandbox availability banner: shown when Docker / the sandbox is down -->
+  <div class="docker-banner hidden" id="dockerBanner">
+    <i data-lucide="alert-triangle" class="docker-banner-icon"></i>
+    <span class="docker-banner-text" id="dockerBannerText">
+      Docker sandbox unavailable - scripts cannot run until Docker is started.
+    </span>
+    <button class="btn btn-secondary btn-sm" id="btnBannerRetry" title="Reconnect the terminal now">
+      <i data-lucide="refresh-cw" class="icon-xs"></i><span>Retry</span>
+    </button>
+    <button class="icon-btn" id="btnBannerDismiss" title="Hide this warning">
+      <i data-lucide="x" class="icon-xs"></i>
+    </button>
+  </div>
 
   <!-- Main IDE Workspace -->
   <main class="app-body">
@@ -128,6 +147,11 @@
       </div>
     </aside>
 
+    <!-- Draggable sidebar resizer (VS Code-style) -->
+    <div class="sidebar-resizer" id="sidebarResizer" title="Drag to resize - double-click to reset">
+      <div class="resizer-handle"></div>
+    </div>
+
     <!-- Center & Right: Split Editor and Terminal -->
     <section class="workspace-viewport">
       <!-- Monaco Code Editor Container -->
@@ -145,13 +169,20 @@
         <div class="divider-handle"></div>
       </div>
 
-      <!-- xterm.js Terminal Container -->
+      <!-- Bottom Panel: Terminal / Problems tabs (VS Code-style) -->
       <div class="terminal-pane" id="terminalPane">
         <div class="pane-header terminal-header">
-          <div class="terminal-title">
-            <i data-lucide="terminal" class="tab-icon"></i>
-            <span>Interactive PTY (pytorch sandbox)</span>
-            <span class="connection-status connected" id="terminalStatusBadge">Connected</span>
+          <div class="panel-tabs">
+            <button class="panel-tab active" id="tabTerminal" title="Interactive terminal">
+              <i data-lucide="terminal" class="tab-icon"></i>
+              <span>TERMINAL</span>
+              <span class="connection-status connected" id="terminalStatusBadge">Connected</span>
+            </button>
+            <button class="panel-tab" id="tabProblems" title="Errors parsed from the terminal output">
+              <i data-lucide="circle-alert" class="tab-icon"></i>
+              <span>PROBLEMS</span>
+              <span class="problem-count hidden" id="problemCount">0</span>
+            </button>
           </div>
           <div class="terminal-actions">
             <button class="icon-btn" id="btnClearTerminal" title="Clear Terminal">
@@ -160,6 +191,9 @@
           </div>
         </div>
         <div id="xtermContainer" class="xterm-container"></div>
+        <div id="problemsContainer" class="problems-container hidden">
+          <div class="problems-empty">No problems have been detected in this session.</div>
+        </div>
       </div>
     </section>
   </main>
@@ -270,6 +304,67 @@
     </div>
   </div>
 
+  <!-- Warning popup: Run Script pressed while the sandbox is unavailable -->
+  <div class="modal-overlay hidden" id="dockerWarnOverlay">
+    <div class="modal-card">
+      <h3 class="modal-title">Sandbox Not Available</h3>
+      <p class="modal-subtitle" id="dockerWarnText">
+        Scripts run inside a Docker sandbox, and Docker is not available right now.
+      </p>
+      <p class="modal-subtitle" style="color: var(--text-muted);">
+        Start Docker Desktop (or the Docker daemon), wait for it to finish starting,
+        then press <strong>Retry</strong> in the yellow bar or <strong>Restart Sandbox</strong>.
+        Your file was saved - nothing was lost.
+      </p>
+      <div class="modal-actions">
+        <button class="btn btn-primary" id="btnOkDockerWarn">OK</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal for choosing the connection target (desktop app only): the local
+       sidecar sandbox or a remote GConnect GPU workstation -->
+  <div class="modal-overlay hidden" id="connectionOverlay">
+    <div class="modal-card connection-modal-card">
+      <h3 class="modal-title">Connect to your GPU</h3>
+      <p class="modal-subtitle">Run GConnect against this PC's local sandbox, or a remote GPU workstation.</p>
+
+      <div class="connection-choices" id="connectionChoices">
+        <button class="connection-choice" id="btnConnectLocal">
+          <i data-lucide="monitor" class="connection-choice-icon"></i>
+          <span class="connection-choice-title">This PC</span>
+          <span class="connection-choice-desc">Local Docker sandbox on this machine</span>
+        </button>
+        <button class="connection-choice" id="btnConnectRemote">
+          <i data-lucide="server-cog" class="connection-choice-icon"></i>
+          <span class="connection-choice-title">Remote GPU PC</span>
+          <span class="connection-choice-desc">Edit and run on another machine's GPUs</span>
+        </button>
+      </div>
+
+      <!-- Modal-level error slot: visible for BOTH the picker and the form -->
+      <div class="connection-error hidden" id="connectionError"></div>
+
+      <div class="connection-form hidden" id="connectionForm">
+        <input type="text" id="connectUrlInput" class="modal-input" placeholder="http://<gpu-pc-ip-or-tailscale-host>:8000" />
+        <input type="password" id="connectTokenInput" class="modal-input" placeholder="Daemon token (remote PC's CONNECT_AUTH_TOKEN)" />
+        <div class="modal-actions">
+          <button class="btn btn-secondary" id="btnConnectionBack">Back</button>
+          <button class="btn btn-primary" id="btnDoConnect">Connect</button>
+        </div>
+      </div>
+
+      <p class="connection-hint">
+        On the remote PC, start the daemon with <code>CONNECT_ALLOW_LAN=true</code> and a fixed
+        <code>CONNECT_AUTH_TOKEN</code>. Prefer Tailscale/WireGuard — the daemon is plain HTTP.
+      </p>
+
+      <div class="modal-actions">
+        <button class="btn btn-secondary hidden" id="btnCancelConnection">Cancel</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Modal for authentication (browser/remote mode only; the desktop app
        receives the token automatically via IPC) -->
   <div class="modal-overlay hidden" id="authOverlay">
@@ -290,6 +385,7 @@
   <script src="js/telemetry.js"></script>
   <script src="js/cluster.js"></script>
   <script src="js/editor.js"></script>
+  <script src="js/problems.js"></script>
   <script src="js/terminal.js"></script>
   <script src="js/filetree.js"></script>
   <script src="js/app.js"></script>

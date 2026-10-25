@@ -1,6 +1,6 @@
 {
   "name": "gconnect",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "private": true,
   "description": "GConnect - Remote GPU Development Platform (desktop)",
   "scripts": {
@@ -8,10 +8,12 @@
     "dev": "tauri dev",
     "build": "tauri build",
     "sidecar": "python scripts/build_sidecar.py",
-    "icon": "python scripts/make_icon.py",
-    "test:backend": "python -m pytest tests/ -v"
+    "test:backend": "python -m pytest tests/ -v",
+    "test:e2e": "playwright test",
+    "test:e2e:headed": "playwright test --headed"
   },
   "devDependencies": {
+    "@playwright/test": "^1.50.0",
     "@tauri-apps/cli": "^2.9.0"
   }
 }

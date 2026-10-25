@@ -49,7 +49,10 @@ class PTYBridge:
                 "can be enabled with CONNECT_ALLOW_LOCAL_FALLBACK=true (runs a HOST shell - "
                 "use only for development on loopback).\x1b[0m\r\n\r\n"
             )
-            await websocket.close()
+            # Application close code 4500 = "sandbox unavailable": lets the
+            # frontend stop its reconnect loop instead of hammering a dead
+            # sandbox every 3 seconds.
+            await websocket.close(code=4500, reason="sandbox-unavailable")
 
     async def _bridge_docker_socket(self, websocket: WebSocket, exec_id: str, sock: Any):
         loop = asyncio.get_running_loop()

@@ -95,7 +95,7 @@ class TerminalManager {
 
       this.ws.onopen = () => {
         this._connecting = false;
-        this.setStatus(true);
+        this.setStatus("connected");
         this.fit();
       };
 
@@ -103,11 +103,22 @@ class TerminalManager {
         if (this.term) {
           this.term.write(event.data);
         }
+        // Feed the PROBLEMS parser (Python tracebacks in the output).
+        if (window.problemsManager) {
+          window.problemsManager.ingest(event.data);
+        }
       };
 
-      this.ws.onclose = () => {
+      this.ws.onclose = (event) => {
         this._connecting = false;
-        this.setStatus(false);
+        if (event && event.code === 4500) {
+          // Server says the sandbox is unavailable (no Docker): stop the
+          // reconnect loop - the yellow banner + Retry button take over.
+          this.setStatus("nosandbox");
+          this.ws = null;
+          return;
+        }
+        this.setStatus("disconnected");
         this.scheduleReconnect();
       };
 
@@ -142,11 +153,16 @@ class TerminalManager {
     }, 3000);
   }
 
-  setStatus(connected) {
+  setStatus(state) {
     if (!this.statusBadge) return;
-    if (connected) {
+    if (state === true) state = "connected";
+    if (state === false) state = "disconnected";
+    if (state === "connected") {
       this.statusBadge.textContent = "Connected";
       this.statusBadge.className = "connection-status connected";
+    } else if (state === "nosandbox") {
+      this.statusBadge.textContent = "No Sandbox";
+      this.statusBadge.className = "connection-status warning";
     } else {
       this.statusBadge.textContent = "Disconnected";
       this.statusBadge.className = "connection-status disconnected";
@@ -174,6 +190,11 @@ class TerminalManager {
   }
 
   sendCommand(cmd) {
+    // A fresh python run invalidates previous TERMINAL problems; editor
+    // lint diagnostics are independent and stay.
+    if (cmd.trim().startsWith("python") && window.problemsManager) {
+      window.problemsManager.clearTerminalProblems();
+    }
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(`${cmd}\n`);
     } else {

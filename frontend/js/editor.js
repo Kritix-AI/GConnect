@@ -8,6 +8,8 @@ class EditorManager {
     this.activeFileIndicator = document.getElementById("activeFileName");
     this.tabsContainer = document.getElementById("editorTabsContainer");
     this._blankModel = null;
+    this._lintTimer = null;
+    this._lintSeq = 0;
   }
 
   init(onReady) {
@@ -45,6 +47,7 @@ class EditorManager {
         if (!this.activeTabPath) return;
         this.markTabDirty(this.activeTabPath, true);
         this.scheduleAutoSave(this.activeTabPath);
+        this.scheduleLint();
       });
 
       this.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
@@ -144,6 +147,7 @@ class EditorManager {
     }
     this.updateSaveStatus(tab.isDirty);
     this.renderTabs();
+    this.scheduleLint(250);
 
     if (window.fileTreeManager && typeof window.fileTreeManager.setActivePath === "function") {
       window.fileTreeManager.setActivePath(path);
@@ -172,6 +176,7 @@ class EditorManager {
     if (tab.model) {
       tab.model.dispose();
     }
+    window.problemsManager?.dropFile?.(path);
     if (this.saveTimeouts.has(path)) {
       clearTimeout(this.saveTimeouts.get(path));
       this.saveTimeouts.delete(path);
@@ -205,6 +210,7 @@ class EditorManager {
     if (!tab) return;
     tab.path = newPath;
     tab.name = newPath.split("/").pop();
+    window.problemsManager?.renameFile?.(oldPath, newPath);
     if (this.activeTabPath === oldPath) {
       this.activeTabPath = newPath;
       if (this.activeFileIndicator) this.activeFileIndicator.textContent = newPath;
@@ -349,6 +355,83 @@ class EditorManager {
     if (!this.activeTabPath) return "";
     const tab = this.tabs.find((t) => t.path === this.activeTabPath);
     return tab && tab.model ? tab.model.getValue() : "";
+  }
+
+  // ------------------------------------------------------------------
+  // Linting: /api/lint drives Monaco squiggles + the PROBLEMS list
+  // ------------------------------------------------------------------
+
+  scheduleLint(delay = 700) {
+    if (this._lintTimer) {
+      clearTimeout(this._lintTimer);
+    }
+    this._lintTimer = setTimeout(() => this.lintActiveFile(), delay);
+  }
+
+  async lintActiveFile() {
+    const path = this.activeTabPath;
+    if (!path || !window.authManager) return;
+
+    const tab = this.tabs.find((t) => t.path === path);
+    if (!tab || !tab.model) return;
+
+    if (!path.toLowerCase().endsWith(".py")) {
+      // Only Python is linted; clear any stale markers/diagnostics.
+      if (!tab.model.isDisposed()) {
+        monaco.editor.setModelMarkers(tab.model, "gconnect-lint", []);
+      }
+      window.problemsManager?.setLintDiagnostics(path, []);
+      return;
+    }
+
+    const content = tab.model.getValue();
+    const seq = ++this._lintSeq;
+    try {
+      const res = await window.authManager.api("/api/lint", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path, content }),
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (seq !== this._lintSeq) return; // a newer lint superseded this one
+
+      const diagnostics = data.diagnostics || [];
+      const model = tab.model;
+      if (model.isDisposed()) return;
+
+      const markers = diagnostics.map((d) => {
+        const line = Math.max(1, d.line || 1);
+        const startCol = Math.max(1, d.col || 1);
+        const boundedLine = Math.min(line, model.getLineCount());
+        const endCol = Math.max(startCol + 1, model.getLineMaxColumn(boundedLine));
+        return {
+          startLineNumber: line,
+          startColumn: startCol,
+          endLineNumber: line,
+          endColumn: endCol,
+          message: d.message,
+          severity:
+            d.severity === "error"
+              ? monaco.MarkerSeverity.Error
+              : monaco.MarkerSeverity.Warning,
+          source: d.source || "lint",
+        };
+      });
+      monaco.editor.setModelMarkers(model, "gconnect-lint", markers);
+      window.problemsManager?.setLintDiagnostics(path, diagnostics);
+    } catch (err) {
+      console.warn("Lint request failed:", err);
+    }
+  }
+
+  /** Jumps to a 1-based line (PROBLEMS panel click-through). */
+  revealLine(line) {
+    if (!this.editor || !line || !Number.isFinite(line)) return;
+    const lineNumber = Math.max(1, Math.floor(line));
+    this.editor.revealLineInCenter(lineNumber);
+    this.editor.setPosition({ lineNumber, column: 1 });
+    this.editor.focus();
   }
 
   resize() {

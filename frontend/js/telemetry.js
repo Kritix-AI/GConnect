@@ -7,6 +7,9 @@ class TelemetryManager {
     this.liveDot = document.getElementById("telemetryLiveDot");
     this.vramBar = document.getElementById("vramBar");
     this.vramValue = document.getElementById("vramValue");
+    this.vramMetricLabel = document.getElementById("vramMetricLabel");
+    this.loadMetricLabel = document.getElementById("loadMetricLabel");
+    this.tempMetric = document.getElementById("tempMetric");
     this.loadValue = document.getElementById("gpuLoadValue");
     this.tempValue = document.getElementById("gpuTempValue");
     this.reconnectTimeout = null;
@@ -102,21 +105,36 @@ class TelemetryManager {
     if (this.staleBadge) this.staleBadge.classList.add("hidden");
     if (this.liveDot) this.liveDot.classList.remove("stale");
 
+    // No NVIDIA GPU at all (mock && not degraded): show CPU + RAM instead
+    // of a zeroed GPU bar. "degraded" keeps the GPU view (last-good values).
+    const hostMode = !!(stat.is_mock && !stat.degraded && !(stat.gpu_count > 0));
+    this._applyHostMode(hostMode, stat);
+
     if (this.modelText) {
-      const count = stat.gpu_count || 0;
-      this.modelText.textContent = count > 1
-        ? `${stat.gpu_name} ×${count}`
-        : stat.gpu_name;
-      // Per-GPU detail on hover: SM (compute) vs memory-controller load.
-      if (stat.gpus && stat.gpus.length > 0) {
-        this.modelText.title = stat.gpus
-          .map((g) => {
-            const sm = g.sm_utilization_percent ?? g.gpu_utilization_percent;
-            const mc = g.memory_controller_percent ?? 0;
-            return `GPU${g.index}: ${g.name}\n  VRAM ${(g.vram_used_mb / 1024).toFixed(1)}/${(g.vram_total_mb / 1024).toFixed(1)} GB\n  Utilization ${g.gpu_utilization_percent}% (SM ${sm}% · MemCtl ${mc}%)\n  Temp ${g.temperature_c}°C`;
-          })
-          .join("\n\n") +
-          "\n\nUtilization = max(SM/compute, memory controller) - comparable to Task Manager. SM-only is the pure compute figure.";
+      if (hostMode) {
+        const host = stat.host || {};
+        this.modelText.textContent = host.name
+          ? (host.cores ? `${host.name} · ${host.cores} threads` : host.name)
+          : "No NVIDIA GPU detected";
+        this.modelText.title = "No NVIDIA GPU detected on this machine - showing CPU and RAM.";
+      } else {
+        const count = stat.gpu_count || 0;
+        this.modelText.textContent = count > 1
+          ? `${stat.gpu_name} ×${count}`
+          : stat.gpu_name;
+        // Per-GPU detail on hover: SM (compute) vs memory-controller load.
+        if (stat.gpus && stat.gpus.length > 0) {
+          this.modelText.title = stat.gpus
+            .map((g) => {
+              const sm = g.sm_utilization_percent ?? g.gpu_utilization_percent;
+              const mc = g.memory_controller_percent ?? 0;
+              return `GPU${g.index}: ${g.name}\n  VRAM ${(g.vram_used_mb / 1024).toFixed(1)}/${(g.vram_total_mb / 1024).toFixed(1)} GB\n  Utilization ${g.gpu_utilization_percent}% (SM ${sm}% · MemCtl ${mc}%)\n  Temp ${g.temperature_c}°C`;
+            })
+            .join("\n\n") +
+            "\n\nUtilization = max(SM/compute, memory controller) - comparable to Task Manager. SM-only is the pure compute figure.";
+        } else {
+          this.modelText.title = "";
+        }
       }
     }
 
@@ -129,6 +147,11 @@ class TelemetryManager {
       this.simBadge.title = stat.degraded
         ? "GPU detected but the sensor could not be read - showing zeros"
         : "No NVIDIA GPU detected on this machine";
+    }
+
+    if (hostMode) {
+      this._renderHostStats(stat.host || {});
+      return;
     }
 
     const usedGb = (stat.vram_used_mb / 1024).toFixed(1);
@@ -158,6 +181,51 @@ class TelemetryManager {
 
     if (this.tempValue) {
       this.tempValue.textContent = `${stat.temperature_c}°C`;
+    }
+  }
+
+  /** Relabels the metric slots when switching between GPU and CPU/RAM views. */
+  _applyHostMode(hostMode) {
+    if (this.vramMetricLabel) {
+      this.vramMetricLabel.textContent = hostMode ? "RAM" : "VRAM";
+    }
+    if (this.loadMetricLabel) {
+      this.loadMetricLabel.textContent = hostMode ? "CPU" : "UTILIZATION";
+    }
+    if (this.tempMetric) {
+      this.tempMetric.classList.toggle("hidden", hostMode);
+    }
+  }
+
+  _renderHostStats(host) {
+    if (!host || !host.ram_total_mb) {
+      if (this.vramValue) this.vramValue.textContent = "— / — GB";
+      if (this.vramBar) this.vramBar.style.width = "0%";
+      return;
+    }
+
+    const usedGb = (host.ram_used_mb / 1024).toFixed(1);
+    const totalGb = (host.ram_total_mb / 1024).toFixed(1);
+
+    if (this.vramValue) {
+      this.vramValue.textContent = `${usedGb} / ${totalGb} GB`;
+    }
+
+    if (this.vramBar) {
+      const pct = Math.min(Math.max(host.ram_percent || 0, 0), 100);
+      this.vramBar.style.width = `${pct}%`;
+
+      this.vramBar.classList.remove("warning", "critical");
+      if (pct > 90) {
+        this.vramBar.classList.add("critical");
+      } else if (pct > 70) {
+        this.vramBar.classList.add("warning");
+      }
+    }
+
+    if (this.loadValue) {
+      this.loadValue.textContent = `${host.percent ?? 0}%`;
+      this.loadValue.title = `CPU utilization across ${host.cores || "?"} logical cores.`;
     }
   }
 }

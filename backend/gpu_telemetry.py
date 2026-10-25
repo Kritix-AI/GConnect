@@ -1,5 +1,7 @@
 import asyncio
 import logging
+import platform
+import sys
 import threading
 import time
 from typing import Any, Dict, List, Optional, Set
@@ -14,6 +16,37 @@ try:
 except ImportError:
     HAS_PYNVML = False
     logger.warning("nvidia-ml-py library not installed. GPU telemetry unavailable.")
+
+try:
+    import psutil
+    HAS_PSUTIL = True
+except ImportError:
+    HAS_PSUTIL = False
+    logger.warning("psutil not installed. CPU/RAM fallback telemetry unavailable.")
+
+
+def _detect_cpu_name() -> str:
+    """Best-effort human-readable CPU model name (registry on Windows,
+    /proc/cpuinfo elsewhere, platform.processor() as last resort)."""
+    try:
+        if sys.platform == "win32":
+            import winreg
+
+            with winreg.OpenKey(
+                winreg.HKEY_LOCAL_MACHINE,
+                r"HARDWARE\DESCRIPTION\System\CentralProcessor\0",
+            ) as key:
+                name, _ = winreg.QueryValueEx(key, "ProcessorNameString")
+                if name and name.strip():
+                    return name.strip()
+        else:
+            with open("/proc/cpuinfo", encoding="utf-8", errors="replace") as f:
+                for line in f:
+                    if line.startswith("model name"):
+                        return line.split(":", 1)[1].strip()
+    except Exception:
+        pass
+    return platform.processor() or "CPU"
 
 # Serve the last successful snapshot for this long when a sampling call fails,
 # so transient NVML errors never flip the UI to zeros (observed as the
@@ -34,6 +67,7 @@ class GPUTelemetryService:
         self.gpu_count = 0
         self.handles: List[Any] = []
         self.gpu_name = "No NVIDIA GPU detected"
+        self._cpu_name = _detect_cpu_name()
         self._subscribers: Set[asyncio.Queue] = set()
         self._broadcast_task: asyncio.Task | None = None
         self._nvml_lock = threading.Lock()
@@ -109,6 +143,23 @@ class GPUTelemetryService:
             "temperature_c": temp,
         }
 
+    def _sample_host(self) -> Dict[str, Any]:
+        """CPU + RAM usage - the UI shows these instead of the GPU bar on
+        machines with no NVIDIA GPU. Empty dict when psutil is unavailable."""
+        if not HAS_PSUTIL:
+            return {}
+        vm = psutil.virtual_memory()
+        # Bare instances (unit tests) may skip __init__; detect lazily.
+        cpu_name = getattr(self, "_cpu_name", None) or _detect_cpu_name()
+        return {
+            "name": cpu_name,
+            "percent": psutil.cpu_percent(interval=None),
+            "cores": psutil.cpu_count(logical=True) or 0,
+            "ram_total_mb": round(vm.total / (1024 * 1024), 1),
+            "ram_used_mb": round((vm.total - vm.available) / (1024 * 1024), 1),
+            "ram_percent": round(vm.percent, 1),
+        }
+
     def get_snapshot(self) -> Dict[str, Any]:
         """Returns the current GPU telemetry payload (blocking NVML access).
         Call via run_in_executor from async contexts. Summary fields are
@@ -145,6 +196,7 @@ class GPUTelemetryService:
                     "memory_utilization_percent": vram_percent,
                     "temperature_c": temp,
                     "gpus": gpus,
+                    "host": self._sample_host(),
                     "is_mock": False,
                     "degraded": False,
                     "timestamp": time.time(),
@@ -177,6 +229,7 @@ class GPUTelemetryService:
             "memory_utilization_percent": 0,
             "temperature_c": 0,
             "gpus": [],
+            "host": self._sample_host(),
             "is_mock": True,
             "degraded": self.nvml_initialized,
             "timestamp": time.time(),

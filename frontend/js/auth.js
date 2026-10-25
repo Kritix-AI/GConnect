@@ -13,6 +13,8 @@ class AuthManager {
     this.token = null;
     this.base = null;           // e.g. "http://127.0.0.1:8000" ("" = same origin)
     this.isDesktop = false;
+    this.mode = null;           // "local" | "remote" (desktop); null in browser mode
+    this.unconfigured = false;  // desktop: no connection chosen yet
     this._readyPromise = null;
   }
 
@@ -29,11 +31,18 @@ class AuthManager {
       this.isDesktop = true;
       try {
         const info = await window.__TAURI__.core.invoke("backend_info");
+        if (!info || info.mode === "unconfigured" || !info.url) {
+          this.unconfigured = true;
+          return;
+        }
+        this.mode = info.mode;
         this.token = info.token;
-        this.base = `http://127.0.0.1:${info.port}`;
+        this.base = info.url;
         return;
       } catch (err) {
         console.error("Failed to obtain backend info from the desktop shell:", err);
+        this.unconfigured = true; // fall back to the connection screen
+        return;
       }
     }
 
@@ -43,6 +52,23 @@ class AuthManager {
       this.token = saved;
     }
     this.base = ""; // same origin
+  }
+
+  /** Desktop app with no connection chosen (or shell failure): the app should
+   * show the connection screen instead of initializing managers. */
+  needsConnection() {
+    return !!(this.isDesktop && this.unconfigured);
+  }
+
+  /** Persists and activates a connection (desktop app only). Returns the
+   * BackendInfo from the shell (remote mode includes an `online` probe). */
+  async setConnection(mode, url, token) {
+    if (!this.isDesktop) {
+      throw new Error("Connection switching is only available in the desktop app.");
+    }
+    return window.__TAURI__.core.invoke("set_connection", {
+      cfg: { mode, url: url || null, token: token || null },
+    });
   }
 
   /** Ask the user for the token (browser mode). Returns true when set. */

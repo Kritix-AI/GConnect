@@ -12,6 +12,7 @@ from backend.config import settings
 from backend.docker_manager import docker_manager
 from backend.file_manager import router as files_router
 from backend.gpu_telemetry import gpu_telemetry_service
+from backend.linter import router as lint_router
 from backend.pty_bridge import pty_bridge
 
 
@@ -85,7 +86,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="GConnect - Remote GPU Development Platform",
     description="Lightweight remote GPU development platform tailored for voice and multimodal AI pipelines.",
-    version="2.1.0",
+    version="2.2.0",
     lifespan=lifespan,
     # API surface is not public; docs would only help attackers.
     docs_url=None,
@@ -100,6 +101,7 @@ app = FastAPI(
 app.middleware("http")(auth.enforce_http_auth)
 
 app.include_router(files_router)
+app.include_router(lint_router)
 
 
 @app.get("/api/health")
