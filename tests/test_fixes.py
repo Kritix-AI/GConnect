@@ -253,13 +253,22 @@ def test_telemetry_host_fallback_fields():
 # ----------------------------------------------------------------------
 
 def test_path_traversal_prevention(authed_client):
+    # Backslash payloads are genuine traversal ONLY on Windows: on POSIX a
+    # backslash is a legal filename character, so e.g. "..\\..\\x" is an
+    # inert (if ugly) name INSIDE the workspace - the backend correctly
+    # accepts it there. Forward-slash payloads must be rejected everywhere.
+    import sys
+
     traversal_paths = [
         "../../system_file.py",
-        "../..\\evil.py",
         "/etc/passwd",
-        "C:\\Windows\\system32\\cmd.exe",
-        "..\\..\\..\\malicious.txt",
     ]
+    if sys.platform == "win32":
+        traversal_paths += [
+            "../..\\evil.py",
+            "C:\\Windows\\system32\\cmd.exe",
+            "..\\..\\..\\malicious.txt",
+        ]
 
     for bad_path in traversal_paths:
         assert authed_client.post(

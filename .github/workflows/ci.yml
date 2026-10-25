@@ -43,8 +43,10 @@ jobs:
           python-version: "3.14"
           cache: pip
 
-      - name: Install daemon dependencies
-        run: pip install -r backend/requirements.txt
+      - name: Create venv and install daemon dependencies
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install -r backend/requirements.txt
 
       - uses: actions/setup-node@v4
         with:
