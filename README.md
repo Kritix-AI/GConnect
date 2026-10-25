@@ -104,7 +104,7 @@ Run the **GConnect desktop app** (or a lightweight daemon on a headless workstat
 
 **Prerequisites:** Windows 10/11 (macOS/Linux: build from source), Docker Desktop *optional* (app degrades gracefully without it).
 
-1. **The ready-made installer sits right at the repository root:** **[`GConnect_2.2.0_x64-setup.exe`](GConnect_2.2.0_x64-setup.exe)** — download it from there or from [Releases](https://github.com/Kritix-AI/GConnect/releases) *(or build it yourself — see [Building from Source](#️-building-from-source))*
+1. Grab the installer from the [**Releases page**](https://github.com/Kritix-AI/GConnect/releases/latest): download **`GConnect_2.2.0_x64-setup.exe`** (verify against the SHA-256 in the release notes if you like)
 2. Run the installer — no admin rights needed
 3. Launch **GConnect**
 
@@ -374,7 +374,7 @@ npm run dev                      # development (hot reload)
 npm run build                    # production installer (NSIS on Windows)
 ```
 
-**Output:** `src-tauri/target/release/bundle/nsis/GConnect_<version>_x64-setup.exe` — the release copy at the repository root comes from this build.
+**Output:** `src-tauri/target/release/bundle/nsis/GConnect_<version>_x64-setup.exe` — published as a [Release](https://github.com/Kritix-AI/GConnect/releases) asset for each version tag.
 
 macOS/Linux: identical commands; the sidecar script auto-detects the Rust target triple. Extend `bundle.targets` in [`tauri.conf.json`](src-tauri/tauri.conf.json) for `dmg`/`appimage`/`deb`.
 
@@ -461,7 +461,6 @@ The remote PC must run its daemon with `CONNECT_ALLOW_LAN=true` and you must add
 
 ```
 GConnect/
-├── GConnect_2.2.0_x64-setup.exe  # ← ready-made Windows installer (start here)
 ├── backend/                 # FastAPI daemon (Python)
 │   ├── auth.py              #   token auth + origin policy + Tauri CORS
 │   ├── cluster_manager.py   #   multi-PC GPU cluster
