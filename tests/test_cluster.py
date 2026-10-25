@@ -338,11 +338,10 @@ def test_telemetry_stream_self_heals_when_broadcaster_dead():
     asyncio.run(main())
 
 
-def test_container_reconcile_upgrades_labelless_container(monkeypatch):
+def test_container_reconcile_upgrades_labelless_container(monkeypatch, tmp_path):
     """Regression: a container created before the config-fingerprint label
     existed (label missing) used to be reused forever without reconciliation.
     It must now be removed and recreated so the desired config applies."""
-    from pathlib import Path
     from unittest.mock import MagicMock
 
     from backend.config import settings
@@ -359,7 +358,7 @@ def test_container_reconcile_upgrades_labelless_container(monkeypatch):
     legacy.attrs = {"Config": {"Labels": {}}}  # no dev.gconnect.config label
     mgr.client.containers.get.return_value = legacy
 
-    monkeypatch.setattr(settings, "WORKSPACE_DIR", Path("D:/some/workspace"), raising=False)
+    monkeypatch.setattr(settings, "WORKSPACE_DIR", tmp_path / "ws", raising=False)
     monkeypatch.setattr(settings, "EPHEMERAL_MODE", False, raising=False)
     monkeypatch.setattr(settings, "CONTAINER_IMAGE", "pytorch/pytorch:latest", raising=False)
     monkeypatch.setattr(settings, "SHM_SIZE", "8g", raising=False)

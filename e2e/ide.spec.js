@@ -113,11 +113,13 @@ test.describe("web IDE functionality", () => {
   });
 
   test("run script warns instead of dying silently when the sandbox is unavailable", async ({ page }) => {
-    // The E2E daemon runs without Docker, so the sandbox is deterministically
-    // unavailable: the yellow banner must appear, and Run must pop a warning
-    // instead of sending the command into a dead terminal.
+    // The E2E daemon runs without a usable Docker sandbox, so this is
+    // deterministically unavailable: the yellow banner must appear, and Run
+    // must pop a warning instead of sending the command into a dead
+    // terminal. (CI runners HAVE Docker but the daemon points DOCKER_HOST at
+    // a dead socket, so the message wording matches local runs.)
     await expect(page.locator("#dockerBanner")).toBeVisible({ timeout: 15_000 });
-    await expect(page.locator("#dockerBannerText")).toContainText("Docker is not running");
+    await expect(page.locator("#dockerBannerText")).toContainText("Scripts cannot run");
 
     await expect(page.locator("#activeFileName")).not.toContainText("No file selected");
     await page.locator("#btnRunScript").click();

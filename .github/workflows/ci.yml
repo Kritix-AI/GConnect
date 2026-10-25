@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+    branches: [v1.0, main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  backend-tests:
+    name: Backend (pytest)
+    runs-on: ubuntu-latest
+    env:
+      # CI runners have a real Docker daemon; point the SDK at a dead socket
+      # so the suite exercises the same no-Docker paths it was developed
+      # against (Docker interactions are unit-tested with mocks regardless).
+      DOCKER_HOST: unix:///tmp/nonexistent-gconnect-docker.sock
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r backend/requirements.txt
+
+      - name: Run backend test suite
+        run: pytest tests/ -v --tb=short
+
+  e2e-tests:
+    name: E2E (Playwright)
+    runs-on: ubuntu-latest
+    env:
+      # Same reasoning as the backend job: deterministic no-Docker daemon.
+      DOCKER_HOST: unix:///tmp/nonexistent-gconnect-docker.sock
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: pip
+
+      - name: Install daemon dependencies
+        run: pip install -r backend/requirements.txt
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run E2E suite (boots a disposable daemon on :8900)
+        run: npm run test:e2e
+
+      - name: Upload failure traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-traces
+          path: |
+            test-results/
+            playwright-report/
+          retention-days: 7

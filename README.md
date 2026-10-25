@@ -7,9 +7,10 @@
 **Turn any PC with an NVIDIA GPU into your private AI development studio — and pool GPUs from every PC you own into one place.**
 
 [![Version](https://img.shields.io/badge/version-2.2.0-3fb950?style=flat-square)](docs/CHANGELOG.md)
+[![CI](https://github.com/Kritix-AI/GConnect/actions/workflows/ci.yml/badge.svg?branch=v1.0)](https://github.com/Kritix-AI/GConnect/actions/workflows/ci.yml)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-58a6ff?style=flat-square)](#-installation)
 [![License: MIT](https://img.shields.io/badge/license-MIT-8b949e?style=flat-square)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-53%20backend%20%2B%2015%20E2E-2ea043?style=flat-square)](#-testing)
+[![Tests](https://img.shields.io/badge/tests-54%20backend%20%2B%2015%20E2E-2ea043?style=flat-square)](#-testing)
 [![Security](https://img.shields.io/badge/security%20audit-26%20issues%20fixed-f85149?style=flat-square)](docs/SECURITY_AUDIT.md)
 
 **Desktop App** · **Docker GPU Sandbox** · **Monaco IDE** · **Live Terminal** · **Real-time Telemetry** · **Multi-PC GPU Cluster**
@@ -76,7 +77,7 @@ Run the **GConnect desktop app** (or a lightweight daemon on a headless workstat
 | 🎵 | **Audio Preview** | Click any `.wav`/`.mp3`/`.ogg`/`.flac` to play it in-app — perfect for TTS output |
 | 📐 | **Resizable Layout** | Draggable sidebar (double-click resets) and editor/terminal split — VS Code-style |
 | 📦 | **One-click Export** | Download files or the whole workspace as a streamed ZIP |
-| 🔐 | **Secure by Default** | Token auth everywhere, loopback-only binding, no CORS wildcards — [full audit](docs/SECURITY_AUDIT.md) |
+| 🔐 | **Secure by Default** | Token auth everywhere, loopback-only binding, no CORS wildcards — [full audit](docs/SECURITY_AUDIT.md), [report a vulnerability](.github/SECURITY.md) |
 | 🖴️ | **System Tray** | Desktop app runs in the tray: open IDE, copy URL, restart daemon, quit |
 | 🧹 | **Disk Cleanup** | One-click model cache wipe with honest freed-space reporting |
 | 🔌 | **Fully Offline** | All frontend libraries vendored — no CDNs, works on air-gapped networks |
@@ -333,6 +334,8 @@ Why not exactly Task Manager's number? Sampling moments differ by a second and V
 
 ## 🧪 Testing
 
+CI runs both suites on every push and pull request (GitHub Actions, [`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
+
 ```bash
 # Backend / API suite (Python)
 pip install -r backend/requirements.txt
@@ -343,7 +346,7 @@ npm install
 npm run test:e2e            # add :headed to watch the browser
 ```
 
-**53 backend tests + 15 E2E tests**, all against isolated temp workspaces (they can never touch your real files or model cache):
+**54 backend tests + 15 E2E tests**, all against isolated temp workspaces (they can never touch your real files or model cache):
 
 - Auth: 401s, token via header/query, cross-origin rejection, Tauri-origin CORS grant, public health, docs disabled, loopback default
 - Files: lifecycle, traversal matrix (save/read/delete/raw/download/rename), mtime conflicts (409), atomic writes, size caps, symlink skipping, streaming ZIP

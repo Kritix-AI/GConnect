@@ -20,6 +20,11 @@ const RUN_ID = Date.now().toString(36);
 const WORKSPACE = path.join(os.tmpdir(), `gconnect-e2e-ws-${RUN_ID}`);
 process.env.PLAYWRIGHT_E2E_WORKSPACE = WORKSPACE;
 
+// venv python layout differs between Windows and Linux/macOS (CI).
+const PYTHON = process.platform === "win32"
+  ? ".venv\\Scripts\\python.exe"
+  : ".venv/bin/python";
+
 module.exports = defineConfig({
   testDir: "./e2e",
   globalSetup: "./e2e/global-setup.js",
@@ -31,7 +36,7 @@ module.exports = defineConfig({
     trace: "retain-on-failure",
   },
   webServer: {
-    command: `.venv\\Scripts\\python.exe -m uvicorn backend.main:app --host 127.0.0.1 --port ${PORT}`,
+    command: `${PYTHON} -m uvicorn backend.main:app --host 127.0.0.1 --port ${PORT}`,
     url: `http://127.0.0.1:${PORT}/api/health`,
     reuseExistingServer: false,
     timeout: 60_000,
