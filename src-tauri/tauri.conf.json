@@ -52,6 +52,14 @@
     "windows": {
       "webviewInstallMode": {
         "type": "downloadBootstrapper"
+      },
+      "nsis": {
+        "installerHooks": "nsis-hooks.nsh",
+        "installerIcon": "icons/gconnect-installer.ico",
+        "uninstallerIcon": "icons/gconnect-installer.ico",
+        "headerImage": "installer-assets/gconnect-header.bmp",
+        "sidebarImage": "installer-assets/gconnect-sidebar.bmp",
+        "uninstallerHeaderImage": "installer-assets/gconnect-header.bmp"
       }
     }
   }

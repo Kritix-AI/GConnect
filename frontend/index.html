@@ -85,6 +85,11 @@
         <span id="clusterBtnLabel">Cluster</span>
       </button>
 
+      <button class="btn btn-secondary btn-sm" id="btnGpuJobs" title="Submit and monitor GPU jobs across connected providers">
+        <i data-lucide="layers-3"></i>
+        <span>GPU Jobs</span>
+      </button>
+
       <button class="btn btn-secondary btn-sm" id="btnRestartSandbox" title="Restart Docker Sandbox">
         <i data-lucide="refresh-cw"></i>
         <span>Restart Sandbox</span>
@@ -110,6 +115,49 @@
     <button class="icon-btn" id="btnBannerDismiss" title="Hide this warning">
       <i data-lucide="x" class="icon-xs"></i>
     </button>
+  </div>
+
+  <!-- Invite-only GPU job submission and lifecycle -->
+  <div class="modal-overlay hidden" id="gpuJobsOverlay">
+    <div class="modal-card gpu-jobs-modal-card">
+      <div class="modal-header-row">
+        <h3 class="modal-title"><i data-lucide="layers-3" class="icon-sm"></i> GPU Jobs</h3>
+        <button class="icon-btn" id="btnCloseGpuJobs" title="Close"><i data-lucide="x" class="icon-sm"></i></button>
+      </div>
+      <p class="modal-subtitle">Run the active Python file on an approved GPU provider. Jobs run in a separate Docker container with a time limit.</p>
+      <div class="gpu-job-form">
+        <div class="gpu-job-source" id="gpuJobSource">No Python file selected</div>
+        <div class="gpu-job-form-row">
+          <input type="text" id="gpuJobName" class="modal-input" maxlength="80" placeholder="Job name" />
+          <select id="gpuJobNode" class="modal-input" aria-label="GPU provider">
+            <option value="">Auto-select provider</option>
+          </select>
+        </div>
+        <div class="gpu-job-form-row">
+          <label class="gpu-job-field">GPUs on one host
+            <select id="gpuJobGpuCount" class="modal-input">
+              <option value="1">1 GPU</option><option value="2">2 GPUs</option><option value="4">4 GPUs</option>
+            </select>
+          </label>
+          <label class="gpu-job-field">Time limit
+            <select id="gpuJobTimeout" class="modal-input">
+              <option value="1800">30 minutes</option><option value="3600" selected>1 hour</option>
+              <option value="10800">3 hours</option><option value="21600">6 hours</option>
+            </select>
+          </label>
+        </div>
+        <label class="gpu-job-network"><input type="checkbox" id="gpuJobNetwork" /> Allow internet access inside this job</label>
+        <label class="gpu-job-network"><input type="checkbox" id="gpuJobDistributed" /> Launch distributed code with torchrun across the selected local GPUs</label>
+        <div class="gpu-job-actions">
+          <span class="gpu-job-hint">Only share this daemon token with developers you trust.</span>
+          <button class="btn btn-primary" id="btnSubmitGpuJob"><i data-lucide="play" class="icon-xs"></i><span>Submit job</span></button>
+        </div>
+        <div class="gpu-job-error hidden" id="gpuJobError"></div>
+      </div>
+      <div class="gpu-jobs-heading"><strong>Recent jobs</strong><button class="icon-btn" id="btnRefreshGpuJobs" title="Refresh jobs"><i data-lucide="rotate-cw" class="icon-xs"></i></button></div>
+      <div class="gpu-job-list" id="gpuJobList"><div class="empty-state">Loading jobs…</div></div>
+      <p class="gpu-job-footnote">Multi-GPU allocation currently selects GPUs on one provider host. Multi-host training requires distributed code such as torchrun, FSDP, DeepSpeed, or Ray.</p>
+    </div>
   </div>
 
   <!-- Main IDE Workspace -->
@@ -283,6 +331,7 @@
           <span class="metric-value" id="clusterVram">0.0 GB</span>
         </div>
       </div>
+      <label class="local-share-option"><input type="checkbox" id="localProviderShare" checked /> Allow invited developers to submit jobs to this PC</label>
 
       <div class="cluster-node-list" id="clusterNodeList">
         <!-- Rendered dynamically -->
@@ -292,6 +341,7 @@
         <input type="text" id="clusterNodeName" class="modal-input cluster-input-name" placeholder="Name (e.g. aryan-desktop)" />
         <input type="text" id="clusterNodeUrl" class="modal-input cluster-input-url" placeholder="http://<pc-ip-or-tailscale-host>:8000" />
         <input type="password" id="clusterNodeToken" class="modal-input cluster-input-token" placeholder="Daemon token" />
+        <label class="cluster-share-option"><input type="checkbox" id="clusterNodeShareJobs" /> Share for jobs</label>
         <button class="btn btn-primary btn-sm" id="btnAddClusterNode">
           <i data-lucide="plus" class="icon-xs"></i><span>Add</span>
         </button>
@@ -299,8 +349,23 @@
       <p class="cluster-hint">
         On the remote PC start the daemon with
         <code>CONNECT_ALLOW_LAN=true</code> and a fixed <code>CONNECT_AUTH_TOKEN</code>
-        (see .env.example). Best over Tailscale/WireGuard.
+        (see .env.example). Enable <strong>Share for jobs</strong> only when the provider owner agrees.
+        Use Tailscale/WireGuard for the daemon connection.
       </p>
+
+      <div class="developer-access-section">
+        <h4>Developer job access</h4>
+        <p class="cluster-hint">Create a limited token for a developer. It only submits, views, cancels, and downloads that developer’s jobs. Share <code>/static/jobs.html</code> with them.</p>
+        <div class="developer-token-form">
+          <input type="text" id="developerTokenName" class="modal-input" maxlength="80" placeholder="Developer name" />
+          <button class="btn btn-primary btn-sm" id="btnCreateDeveloperToken"><i data-lucide="key-round" class="icon-xs"></i><span>Create token</span></button>
+        </div>
+        <div class="developer-token-issued hidden" id="developerTokenIssued">
+          <div><strong>Copy this token now. It will not be shown again.</strong><code id="developerTokenValue"></code></div>
+          <button class="btn btn-secondary btn-sm" id="btnCopyDeveloperToken">Copy</button>
+        </div>
+        <div class="developer-token-list" id="developerTokenList"></div>
+      </div>
     </div>
   </div>
 
@@ -384,6 +449,7 @@
   <script src="js/auth.js"></script>
   <script src="js/telemetry.js"></script>
   <script src="js/cluster.js"></script>
+  <script src="js/jobs.js"></script>
   <script src="js/editor.js"></script>
   <script src="js/problems.js"></script>
   <script src="js/terminal.js"></script>

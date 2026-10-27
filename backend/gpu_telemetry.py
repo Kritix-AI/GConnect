@@ -185,6 +185,7 @@ class GPUTelemetryService:
 
                 snapshot = {
                     "type": "gpu_stat",
+                    "host_platform": platform.system().lower(),
                     "gpu_name": self.gpu_name,
                     "gpu_count": self.gpu_count,
                     "vram_total_mb": total_mb,
@@ -219,6 +220,7 @@ class GPUTelemetryService:
         # "no NVIDIA hardware/driver at all".
         return {
             "type": "gpu_stat",
+            "host_platform": platform.system().lower(),
             "gpu_name": self.gpu_name,
             "gpu_count": 0,
             "vram_total_mb": 0.0,

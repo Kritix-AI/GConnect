@@ -72,6 +72,7 @@ Run the **GConnect desktop app** (or a lightweight daemon on a headless workstat
 | ⚠️ | **Sandbox Status Banner** | Docker down? A yellow banner + Run-dialog tell you *where* and why — scripts never die silently |
 | 📊 | **Live Telemetry** | 2 Hz NVML sampling, all GPUs, self-healing stream, "NO SIGNAL"/"STALE" honesty indicators; **GPU-less machines show CPU + RAM instead** |
 | 🌐 | **GPU Cluster** | Multi-PC node registry, pooled VRAM, per-node/per-GPU stats, live status |
+| 🧩 | **Shared GPU Jobs (pilot)** | Opt-in GPU providers, scoped developer tokens, remote job scheduling, logs, cancellation, and output downloads |
 | 🐳 | **Docker Sandbox** | Auto-created/reconciled container, GPU passthrough, 8 GB shm, port 8001 forwarded for audio streams |
 | 💾 | **Persistent Model Cache** | `HF_HOME=/workspace/.hf_cache` — 9 GB of models download once |
 | 🎵 | **Audio Preview** | Click any `.wav`/`.mp3`/`.ogg`/`.flac` to play it in-app — perfect for TTS output |
@@ -394,6 +395,20 @@ macOS/Linux: identical commands; the sidecar script auto-detects the Rust target
 
 ---
 
+## Shared GPU Jobs (Invite-only Pilot)
+
+The Cluster panel can dispatch bounded Python jobs to this PC or to a registered provider that has explicitly enabled **Share for jobs**. The owner can create a **jobs-only developer token** there; the developer opens `/static/jobs.html` and submits code without receiving the daemon administrator token.
+
+Each job runs in its own Docker container using the provider's configured `CONNECT_CONTAINER_IMAGE`. The container receives only the submitted script and a writable output folder, requests the selected number of GPUs on one provider host, has a six-hour maximum runtime, 8 GB memory, four CPU limits, and a 256 MB output limit. Network access is disabled unless the developer opts in. Logs stream to the job page, and completed output files can be downloaded as a ZIP.
+
+For a remote provider, its owner first enables local job sharing in that daemon's Cluster panel. Register the daemon over a trusted network such as Tailscale/WireGuard, then explicitly enable sharing for that node on the coordinator too. Use a strong daemon token for coordinator-to-provider communication. Give developers only the generated `gct_...` scoped token, and revoke it from the Cluster panel when access should end. Revocation also requests cancellation of that token's active jobs.
+
+This pilot schedules each job on one provider host. Select multiple GPUs and enable the torchrun option to launch one process per GPU; the Python script still needs to initialize/use distributed training (for example PyTorch DDP/FSDP or DeepSpeed). GPUs on separate PCs do not become one native CUDA memory pool. Multi-host distributed job orchestration is a later stage; the existing manual Ray examples remain the way to experiment across hosts.
+
+> Shared jobs are for invited developers and trusted provider machines. Docker containers provide useful process isolation, but do not establish a strong security boundary for untrusted public workloads. Do not expose provider daemons directly to the public internet.
+
+---
+
 ## 📋 API Reference
 
 Base URL: `http://127.0.0.1:<port>` — all routes except `/api/health` require the token.
@@ -414,6 +429,10 @@ Base URL: `http://127.0.0.1:<port>` — all routes except `/api/health` require 
 | `POST` | `/api/cache/wipe` | Free disk (honest reporting) |
 | `GET` | `/api/cluster/status` | All nodes + pooled VRAM |
 | `GET/POST/DELETE` | `/api/cluster/nodes` | Cluster registry (tokens never returned) |
+| `GET/POST` | `/api/jobs` | Schedule a job or list jobs visible to the caller |
+| `GET` | `/api/jobs/{id}` · `/api/jobs/{id}/artifacts` | Inspect or download a job's output ZIP |
+| `POST` | `/api/jobs/{id}/cancel` | Cancel one of the caller's active jobs |
+| `GET/POST/DELETE` | `/api/access-tokens` | Administer scoped developer job tokens |
 
 ---
 

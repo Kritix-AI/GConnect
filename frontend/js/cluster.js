@@ -11,6 +11,14 @@ class ClusterManager {
     this.inputName = document.getElementById("clusterNodeName");
     this.inputUrl = document.getElementById("clusterNodeUrl");
     this.inputToken = document.getElementById("clusterNodeToken");
+    this.inputShareJobs = document.getElementById("clusterNodeShareJobs");
+    this.localShareInput = document.getElementById("localProviderShare");
+    this.developerTokenName = document.getElementById("developerTokenName");
+    this.createDeveloperTokenButton = document.getElementById("btnCreateDeveloperToken");
+    this.developerTokenList = document.getElementById("developerTokenList");
+    this.developerTokenIssued = document.getElementById("developerTokenIssued");
+    this.developerTokenValue = document.getElementById("developerTokenValue");
+    this.copyDeveloperTokenButton = document.getElementById("btnCopyDeveloperToken");
     this.btnAdd = document.getElementById("btnAddClusterNode");
     this.refreshTimer = null;
   }
@@ -25,6 +33,9 @@ class ClusterManager {
     if (this.btnAdd) {
       this.btnAdd.addEventListener("click", () => this.addNode());
     }
+    this.createDeveloperTokenButton?.addEventListener("click", () => this.createDeveloperToken());
+    this.copyDeveloperTokenButton?.addEventListener("click", () => this.copyDeveloperToken());
+    this.localShareInput?.addEventListener("change", () => this.setLocalJobsEnabled(this.localShareInput.checked));
     [this.inputName, this.inputUrl, this.inputToken].forEach((el) => {
       if (el) {
         el.addEventListener("keydown", (e) => {
@@ -42,6 +53,7 @@ class ClusterManager {
     if (this.overlay) {
       this.overlay.classList.remove("hidden");
       this.refreshStatus();
+      this.refreshDeveloperTokens();
       this.refreshTimer = setInterval(() => this.refreshStatus(), 4000);
       if (window.lucide) window.lucide.createIcons();
     }
@@ -69,6 +81,8 @@ class ClusterManager {
   }
 
   render(data) {
+    const localNode = (data.nodes || []).find((node) => node.local);
+    if (this.localShareInput && localNode) this.localShareInput.checked = Boolean(localNode.jobs_enabled);
     if (this.btnLabel) {
       this.btnLabel.textContent =
         `${data.online_count}/${data.node_count} PCs · ` +
@@ -114,14 +128,19 @@ class ClusterManager {
             : "";
 
       const vramPct = Math.min(Math.max(node.vram_percent || 0, 0), 100);
+      const providerDisabled = !node.local && node.online && node.provider_jobs_enabled === false;
 
       el.innerHTML = `
         <div class="cluster-node-head">
           ${statusDot}
           <span class="cluster-node-name">${escapeHtml(node.name)}</span>
           ${node.local ? '<span class="cluster-local-tag">THIS PC</span>' : ""}
+          ${node.jobs_enabled ? '<span class="cluster-sharing-tag">SHARING JOBS</span>' : ""}
           <span class="cluster-node-gpus">${node.gpu_count} GPU${node.gpu_count === 1 ? "" : "s"}</span>
           ${!node.local ? `
+            <button class="btn btn-secondary btn-sm cluster-node-share" ${providerDisabled ? "disabled" : ""} title="${providerDisabled ? "The provider owner must enable local GPU sharing on that PC." : node.jobs_enabled ? "Stop sharing this GPU provider" : "Allow GPU jobs on this provider"}">
+              ${providerDisabled ? "Provider off" : node.jobs_enabled ? "Stop sharing" : "Share for jobs"}
+            </button>
             <button class="icon-btn cluster-node-remove" title="Remove node">
               <i data-lucide="trash" class="icon-xs"></i>
             </button>` : ""}
@@ -138,6 +157,13 @@ class ClusterManager {
         removeBtn.addEventListener("click", (e) => {
           e.stopPropagation();
           this.removeNode(node.name);
+        });
+      }
+      const shareBtn = el.querySelector(".cluster-node-share");
+      if (shareBtn) {
+        shareBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          this.setJobsEnabled(node.name, !node.jobs_enabled);
         });
       }
 
@@ -161,7 +187,7 @@ class ClusterManager {
       const res = await window.authManager.api("/api/cluster/nodes", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, url, token }),
+          body: JSON.stringify({ name, url, token, jobs_enabled: Boolean(this.inputShareJobs?.checked) }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -171,10 +197,50 @@ class ClusterManager {
       if (this.inputName) this.inputName.value = "";
       if (this.inputUrl) this.inputUrl.value = "";
       if (this.inputToken) this.inputToken.value = "";
+      if (this.inputShareJobs) this.inputShareJobs.checked = false;
       this.refreshStatus();
     } catch (err) {
       console.error("Add cluster node error:", err);
       alert("Error adding node.");
+    }
+  }
+
+  async setJobsEnabled(name, enabled) {
+    if (!enabled && !confirm(`Stop sharing '${name}' and cancel its active GPU jobs?`)) {
+      this.refreshStatus();
+      return;
+    }
+    try {
+      const res = await window.authManager.api("/api/cluster/nodes/sharing", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, enabled }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || "Could not update provider sharing.");
+      this.refreshStatus();
+    } catch (err) {
+      alert(err.message || "Could not update provider sharing.");
+    }
+  }
+
+  async setLocalJobsEnabled(enabled) {
+    if (!enabled && !confirm("Stop sharing this PC and cancel its active GPU jobs?")) {
+      if (this.localShareInput) this.localShareInput.checked = true;
+      return;
+    }
+    try {
+      const res = await window.authManager.api("/api/cluster/local-sharing", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "this-pc", enabled }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || "Could not update local GPU sharing.");
+      this.refreshStatus();
+    } catch (err) {
+      if (this.localShareInput) this.localShareInput.checked = !enabled;
+      alert(err.message || "Could not update local GPU sharing.");
     }
   }
 
@@ -191,6 +257,83 @@ class ClusterManager {
     } catch (err) {
       console.error("Remove cluster node error:", err);
       alert("Failed to remove node.");
+    }
+  }
+
+  async refreshDeveloperTokens() {
+    if (!this.developerTokenList) return;
+    try {
+      const res = await window.authManager.api("/api/access-tokens");
+      if (!res.ok) return;
+      const data = await res.json();
+      this.developerTokenList.replaceChildren();
+      for (const token of data.tokens || []) {
+        const row = document.createElement("div");
+        row.className = "developer-token-row";
+        const details = document.createElement("span");
+        details.textContent = `${token.name} · …${token.last_four} · ${token.revoked ? "revoked" : "active"}`;
+        row.appendChild(details);
+        if (!token.revoked) {
+          const revoke = document.createElement("button");
+          revoke.className = "btn btn-secondary btn-sm";
+          revoke.textContent = "Revoke";
+          revoke.addEventListener("click", () => this.revokeDeveloperToken(token.id));
+          row.appendChild(revoke);
+        }
+        this.developerTokenList.appendChild(row);
+      }
+      if (!this.developerTokenList.children.length) {
+        this.developerTokenList.textContent = "No developer tokens yet.";
+      }
+    } catch (err) {
+      console.warn("Could not load developer tokens:", err);
+    }
+  }
+
+  async createDeveloperToken() {
+    const name = this.developerTokenName?.value.trim();
+    if (!name) return alert("Enter a developer name for this token.");
+    try {
+      const res = await window.authManager.api("/api/access-tokens", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || "Could not create developer token.");
+      if (this.developerTokenName) this.developerTokenName.value = "";
+      if (this.developerTokenValue) this.developerTokenValue.textContent = data.token;
+      this.developerTokenIssued?.classList.remove("hidden");
+      await this.refreshDeveloperTokens();
+    } catch (err) {
+      alert(err.message || "Could not create developer token.");
+    }
+  }
+
+  async copyDeveloperToken() {
+    const token = this.developerTokenValue?.textContent || "";
+    try {
+      await navigator.clipboard.writeText(token);
+      this.copyDeveloperTokenButton.textContent = "Copied";
+    } catch (_) {
+      const range = document.createRange();
+      range.selectNodeContents(this.developerTokenValue);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      this.copyDeveloperTokenButton.textContent = "Select and copy";
+    }
+  }
+
+  async revokeDeveloperToken(tokenId) {
+    if (!confirm("Revoke this developer token? The developer will lose access immediately.")) return;
+    try {
+      const res = await window.authManager.api(`/api/access-tokens/${encodeURIComponent(tokenId)}`, { method: "DELETE" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || "Could not revoke token.");
+      await this.refreshDeveloperTokens();
+    } catch (err) {
+      alert(err.message || "Could not revoke token.");
     }
   }
 }

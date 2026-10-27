@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GConnect GPU Jobs</title>
+  <script src="vendor/lucide/lucide.min.js"></script>
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body class="dark-theme gpu-job-portal">
+  <header class="gpu-portal-header">
+    <div class="brand-logo"><i data-lucide="cpu" class="brand-icon"></i><span class="brand-title">GConnect</span><span class="brand-badge">GPU Jobs</span></div>
+    <button class="btn btn-secondary btn-sm hidden" id="btnJobPortalDisconnect">Disconnect</button>
+  </header>
+  <main class="gpu-portal-main">
+    <section class="gpu-portal-card" id="jobPortalLogin">
+      <h1 class="modal-title">Connect to shared GPUs</h1>
+      <p class="modal-subtitle">Paste the limited developer token from your GPU provider. It can only access jobs created with this token.</p>
+      <input type="password" class="modal-input" id="jobPortalToken" placeholder="Developer access token" autocomplete="off">
+      <button class="btn btn-primary" id="btnJobPortalConnect">Connect</button>
+      <div class="gpu-job-error hidden" id="jobPortalLoginError"></div>
+    </section>
+
+    <section class="gpu-portal-card hidden" id="jobPortalApp">
+      <div class="gpu-portal-title-row">
+        <div><h1 class="modal-title">Submit a GPU job</h1><p class="modal-subtitle">Your code runs in an isolated, time-limited Docker container on an available provider.</p></div>
+        <button class="icon-btn" id="btnJobPortalRefresh" title="Refresh jobs"><i data-lucide="rotate-cw" class="icon-sm"></i></button>
+      </div>
+      <label class="gpu-portal-label">Job name<input type="text" class="modal-input" id="portalJobName" maxlength="80" placeholder="Training run"></label>
+      <label class="gpu-portal-label">Python script<textarea class="gpu-portal-code" id="portalJobScript" spellcheck="false" placeholder="import torch&#10;print(torch.cuda.get_device_name(0))"></textarea></label>
+      <div class="gpu-job-form-row">
+        <label class="gpu-job-field">GPUs on one provider
+          <select id="portalGpuCount" class="modal-input"><option value="1">1 GPU</option><option value="2">2 GPUs</option><option value="4">4 GPUs</option></select>
+        </label>
+        <label class="gpu-job-field">Time limit
+          <select id="portalTimeout" class="modal-input"><option value="1800">30 minutes</option><option value="3600" selected>1 hour</option><option value="10800">3 hours</option><option value="21600">6 hours</option></select>
+        </label>
+      </div>
+      <label class="gpu-job-network"><input type="checkbox" id="portalNetwork"> Allow internet access inside this job</label>
+      <label class="gpu-job-network"><input type="checkbox" id="portalDistributed"> Launch distributed code with torchrun across the selected GPUs</label>
+      <div class="gpu-portal-submit-row"><span class="gpu-job-footnote">Network access is off by default. Only submit code you are allowed to run.</span><button class="btn btn-primary" id="btnPortalSubmit">Submit job</button></div>
+      <div class="gpu-job-error hidden" id="jobPortalError"></div>
+      <h2 class="gpu-portal-jobs-title">Your recent jobs</h2>
+      <div class="gpu-job-list" id="portalJobList"><div class="empty-state">No jobs yet.</div></div>
+      <p class="gpu-job-footnote">Multi-GPU jobs run on one host. Distributed training across hosts requires code that uses a distributed framework such as torchrun, FSDP, DeepSpeed, or Ray.</p>
+    </section>
+  </main>
+  <script src="js/jobs_portal.js"></script>
+</body>
+</html>

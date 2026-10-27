@@ -783,7 +783,8 @@ body.dark-theme {
 }
 
 .cluster-add-form {
-  display: flex;
+  display: grid;
+  grid-template-columns: 130px minmax(0, 1.4fr) minmax(0, 1fr) auto;
   gap: 6px;
   align-items: center;
 }
@@ -791,16 +792,216 @@ body.dark-theme {
 .cluster-add-form .modal-input {
   margin-bottom: 0;
 }
+.local-share-option { display: flex; align-items: center; gap: 7px; color: var(--text-muted); font-size: 11px; margin: 8px 0; }
+.local-share-option input { accent-color: var(--accent-blue); }
 
-.cluster-input-name { width: 130px; flex-shrink: 0; }
-.cluster-input-url { flex: 1.4; }
-.cluster-input-token { flex: 1; }
+.cluster-input-name, .cluster-input-url, .cluster-input-token { width: auto; min-width: 0; }
+.cluster-share-option { grid-column: 1 / 4; display: flex; align-items: center; gap: 4px; color: var(--text-muted); font-size: 10px; white-space: nowrap; }
+.cluster-share-option input { accent-color: var(--accent-blue); }
+.cluster-sharing-tag { font-size: 9px; font-weight: 700; color: var(--accent-green-hover); }
 
 .cluster-hint {
   font-size: 11px;
   color: var(--text-muted);
   margin-top: 10px;
   line-height: 1.5;
+}
+
+/* GPU job submission and provider queue */
+.gpu-jobs-modal-card {
+  width: min(760px, 94vw);
+  max-height: 88vh;
+  overflow-y: auto;
+}
+
+.gpu-job-form {
+  padding: 14px;
+  margin: 12px 0 16px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+}
+
+.gpu-job-source {
+  color: var(--accent-blue);
+  font: 11px var(--font-mono);
+  overflow-wrap: anywhere;
+  margin-bottom: 12px;
+}
+
+.gpu-job-form-row {
+  display: flex;
+  gap: 10px;
+}
+
+.gpu-job-form-row > .modal-input { flex: 1; min-width: 0; }
+
+.gpu-job-field {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.gpu-job-field .modal-input {
+  display: block;
+  margin-top: 5px;
+  margin-bottom: 10px;
+}
+
+.gpu-job-network {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  margin: 2px 0 12px;
+}
+
+.gpu-job-network input { accent-color: var(--accent-blue); }
+
+.gpu-job-actions, .gpu-jobs-heading, .gpu-job-card-head, .gpu-job-card-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.gpu-job-hint, .gpu-job-footnote {
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.gpu-job-error {
+  color: var(--accent-red);
+  font-size: 12px;
+  margin-top: 10px;
+}
+
+.gpu-jobs-heading { margin: 0 0 8px; color: var(--text-bright); }
+.gpu-jobs-heading .icon-btn { margin-left: auto; }
+
+.gpu-job-list { display: flex; flex-direction: column; gap: 8px; }
+
+.gpu-job-card {
+  padding: 10px 12px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-primary);
+  border-radius: 7px;
+}
+
+.gpu-job-card-head strong { color: var(--text-bright); font-size: 13px; overflow-wrap: anywhere; }
+.gpu-job-state { font-size: 10px; text-transform: uppercase; font-weight: 700; color: var(--accent-amber); }
+.gpu-job-state.state-running, .gpu-job-state.state-completed { color: var(--accent-green-hover); }
+.gpu-job-state.state-failed, .gpu-job-state.state-timeout, .gpu-job-state.state-cancelled { color: var(--accent-red); }
+.gpu-job-card-info { color: var(--text-muted); font-size: 10px; margin: 4px 0 7px; }
+.gpu-job-card-actions { justify-content: flex-start; }
+.gpu-job-card-actions details { flex: 1; min-width: 0; }
+.gpu-job-card-actions summary { cursor: pointer; color: var(--accent-blue); font-size: 11px; }
+.gpu-job-logs {
+  margin-top: 6px;
+  padding: 8px;
+  max-height: 180px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: var(--bg-secondary);
+  border-radius: 4px;
+  color: var(--text-main);
+  font: 11px/1.5 var(--font-mono);
+  user-select: text;
+}
+
+.gpu-job-footnote { margin-top: 10px; }
+
+.gpu-job-portal {
+  height: 100vh;
+  min-height: 100vh;
+  overflow: auto;
+  user-select: text;
+}
+
+.gpu-portal-header {
+  min-height: 58px;
+  padding: 0 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.gpu-portal-main {
+  width: min(900px, calc(100% - 32px));
+  margin: 28px auto;
+}
+
+.gpu-portal-card {
+  padding: 22px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+}
+
+.gpu-portal-title-row, .gpu-portal-submit-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.gpu-portal-label {
+  display: block;
+  color: var(--text-muted);
+  font-size: 12px;
+  margin: 10px 0;
+}
+
+.gpu-portal-label .modal-input { display: block; margin: 6px 0 0; }
+
+.gpu-portal-code {
+  width: 100%;
+  min-height: 260px;
+  margin-top: 6px;
+  padding: 12px;
+  resize: vertical;
+  color: var(--text-main);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  outline: none;
+  font: 12px/1.5 var(--font-mono);
+  tab-size: 4;
+}
+
+.gpu-portal-code:focus { border-color: var(--accent-blue); }
+.gpu-portal-submit-row { align-items: center; margin: 8px 0 14px; }
+.gpu-portal-jobs-title { font-size: 14px; color: var(--text-bright); margin: 22px 0 10px; }
+.gpu-portal-card .modal-input { color-scheme: dark; }
+
+.developer-access-section {
+  border-top: 1px solid var(--border-color);
+  margin-top: 16px;
+  padding-top: 14px;
+}
+
+.developer-access-section h4 { color: var(--text-bright); font-size: 13px; margin-bottom: 5px; }
+.developer-token-form { display: flex; gap: 8px; align-items: center; }
+.developer-token-form .modal-input { margin: 0; flex: 1; }
+.developer-token-list { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; color: var(--text-muted); font-size: 11px; }
+.developer-token-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 8px; background: var(--bg-primary); border-radius: 5px; }
+.developer-token-issued { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 10px; padding: 10px; background: var(--bg-primary); border: 1px solid var(--accent-green); border-radius: 6px; font-size: 11px; }
+.developer-token-issued code { display: block; margin-top: 6px; color: var(--accent-green-hover); overflow-wrap: anywhere; user-select: text; }
+
+@media (max-width: 560px) {
+  .gpu-job-form-row { flex-direction: column; gap: 0; }
+  .gpu-job-actions { align-items: flex-start; flex-direction: column; }
+  .cluster-add-form { grid-template-columns: 1fr 1fr; }
+  .cluster-input-name, .cluster-input-url, .cluster-input-token { grid-column: 1 / 3; }
+  .cluster-share-option { grid-column: 1 / 2; }
+  .gpu-portal-card { padding: 14px; }
+  .gpu-portal-submit-row { align-items: stretch; flex-direction: column; }
+  .gpu-portal-header { padding: 0 12px; }
 }
 
 

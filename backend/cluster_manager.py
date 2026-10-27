@@ -37,6 +37,7 @@ def _normalize_url(url: str) -> str:
 class ClusterManager:
     def __init__(self):
         self._nodes: List[Dict[str, Any]] = []
+        self.local_jobs_enabled = True
         self._load()
 
     # ------------------------------------------------------------------
@@ -51,6 +52,7 @@ class ClusterManager:
         try:
             if self.nodes_file.exists():
                 data = json.loads(self.nodes_file.read_text(encoding="utf-8"))
+                self.local_jobs_enabled = bool(data.get("local_jobs_enabled", True))
                 self._nodes = [
                     n for n in data.get("nodes", [])
                     if isinstance(n, dict) and n.get("name") and n.get("url")
@@ -62,7 +64,7 @@ class ClusterManager:
     def _save(self) -> None:
         self.nodes_file.parent.mkdir(parents=True, exist_ok=True)
         self.nodes_file.write_text(
-            json.dumps({"nodes": self._nodes}, indent=2), encoding="utf-8"
+            json.dumps({"nodes": self._nodes, "local_jobs_enabled": self.local_jobs_enabled}, indent=2), encoding="utf-8"
         )
         try:
             import os
@@ -75,7 +77,7 @@ class ClusterManager:
     # Registry operations
     # ------------------------------------------------------------------
 
-    def add_node(self, name: str, url: str, token: str) -> Dict[str, Any]:
+    def add_node(self, name: str, url: str, token: str, jobs_enabled: bool = False) -> Dict[str, Any]:
         name = name.strip()
         if not name:
             raise ValueError("Node name is required.")
@@ -90,6 +92,7 @@ class ClusterManager:
             "url": url,
             "token": token.strip(),
             "added_at": time.time(),
+            "jobs_enabled": bool(jobs_enabled),
         }
         self._nodes.append(node)
         self._save()
@@ -105,6 +108,18 @@ class ClusterManager:
         logger.info(f"Removed cluster node '{name}'")
         return True
 
+    def set_jobs_enabled(self, name: str, enabled: bool) -> bool:
+        for node in self._nodes:
+            if node["name"] == name:
+                node["jobs_enabled"] = bool(enabled)
+                self._save()
+                return True
+        return False
+
+    def set_local_jobs_enabled(self, enabled: bool) -> None:
+        self.local_jobs_enabled = bool(enabled)
+        self._save()
+
     def list_nodes(self) -> List[Dict[str, Any]]:
         """Node list WITHOUT tokens (safe for the UI)."""
         return [self._public_view(n) for n in self._nodes]
@@ -115,6 +130,7 @@ class ClusterManager:
             "name": node["name"],
             "url": node["url"],
             "added_at": node.get("added_at", 0),
+            "jobs_enabled": bool(node.get("jobs_enabled", False)),
         }
 
     # ------------------------------------------------------------------
@@ -130,6 +146,7 @@ class ClusterManager:
             "name": "this-pc",
             "url": "local",
             "local": True,
+            "jobs_enabled": self.local_jobs_enabled,
             "online": True,
             "gpu_name": snap["gpu_name"],
             "gpu_count": snap["gpu_count"],
@@ -140,6 +157,7 @@ class ClusterManager:
             "gpu_utilization_percent": snap["gpu_utilization_percent"],
             "temperature_c": snap["temperature_c"],
             "telemetry_is_mock": snap["is_mock"],
+            "host_platform": snap.get("host_platform", "unknown"),
             "telemetry_degraded": snap.get("degraded", False),
             "host": snap.get("host", {}),
             "container_status": container.get("container_status"),
@@ -151,6 +169,7 @@ class ClusterManager:
             "name": node["name"],
             "url": node["url"],
             "local": False,
+            "jobs_enabled": bool(node.get("jobs_enabled", False)),
             "online": False,
             "gpu_name": "unreachable",
             "gpu_count": 0,
@@ -165,6 +184,7 @@ class ClusterManager:
             "host": {},
             "container_status": "unknown",
             "gpu_passthrough": False,
+            "provider_jobs_enabled": False,
             "error": None,
         }
         try:
@@ -181,6 +201,8 @@ class ClusterManager:
 
                 cont_res = client.get(f"{node['url']}/api/container/status")
                 cont = cont_res.json() if cont_res.status_code == 200 else {}
+                share_res = client.get(f"{node['url']}/api/worker/status")
+                share = share_res.json() if share_res.status_code == 200 else {}
 
             status.update(
                 {
@@ -194,10 +216,13 @@ class ClusterManager:
                     "gpu_utilization_percent": snap.get("gpu_utilization_percent", 0),
                     "temperature_c": snap.get("temperature_c", 0),
                     "telemetry_is_mock": snap.get("is_mock", True),
+                    "host_platform": snap.get("host_platform", "unknown"),
                     "telemetry_degraded": snap.get("degraded", False),
                     "host": snap.get("host", {}),
                     "container_status": cont.get("container_status", "unknown"),
                     "gpu_passthrough": cont.get("gpu_passthrough", False),
+                    "provider_jobs_enabled": bool(share.get("jobs_enabled", True)),
+                    "jobs_enabled": bool(node.get("jobs_enabled", False) and share.get("jobs_enabled", True)),
                     "error": None,
                 }
             )

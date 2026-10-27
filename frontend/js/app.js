@@ -68,6 +68,9 @@ class AppManager {
     if (window.clusterManager) {
       window.clusterManager.init();
     }
+    if (window.gpuJobsManager) {
+      window.gpuJobsManager.init();
+    }
 
     window.editorManager.init(() => {
       this.ensureSampleScript();

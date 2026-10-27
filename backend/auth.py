@@ -20,6 +20,7 @@ from fastapi import HTTPException, Request, Response, WebSocket
 from fastapi.responses import JSONResponse
 
 from backend.config import settings
+from backend.access_tokens import developer_tokens
 
 logger = logging.getLogger("connect.auth")
 
@@ -130,8 +131,27 @@ def _tauri_cors_headers(origin: str) -> Dict[str, str]:
     }
 
 
+def _job_token_can_access(method: str, path: str) -> bool:
+    """Developer credentials are deliberately limited to job workflows."""
+    parts = path.strip("/").split("/")
+    if parts == ["api", "jobs"] and method in {"GET", "POST"}:
+        return True
+    if len(parts) == 3 and parts[:2] == ["api", "jobs"] and parts[2].isalnum() and method == "GET":
+        return True
+    if len(parts) == 4 and parts[:2] == ["api", "jobs"] and parts[2].isalnum():
+        return (parts[3] == "cancel" and method == "POST") or (parts[3] == "artifacts" and method == "GET")
+    return False
+
+
 async def enforce_http_auth(request: Request, call_next):
     path = request.url.path
+
+    if request.method == "POST" and path in {"/api/jobs", "/api/worker/jobs"}:
+        try:
+            if int(request.headers.get("content-length", "0")) > 2 * 1024 * 1024:
+                return JSONResponse(status_code=413, content={"detail": "GPU job request exceeds the 2 MB limit."})
+        except ValueError:
+            return JSONResponse(status_code=400, content={"detail": "Invalid content length."})
 
     if path in PUBLIC_PATHS or path.startswith(PUBLIC_PATH_PREFIXES):
         return await call_next(request)
@@ -155,6 +175,17 @@ async def enforce_http_auth(request: Request, call_next):
         return response
 
     supplied = _request_token(request)
+    developer_id = developer_tokens.resolve(supplied)
+    if developer_id:
+        if not _job_token_can_access(request.method, path):
+            return JSONResponse(status_code=403, content={"detail": "Developer tokens can access GPU jobs only."})
+        request.state.job_owner_id = developer_id
+        response = await call_next(request)
+        if is_tauri:
+            for k, v in _tauri_cors_headers(origin).items():
+                response.headers.append(k, v)
+        return response
+
     expected = get_token()
     if not supplied or not hmac.compare_digest(supplied, expected):
         return JSONResponse(status_code=401, content={"detail": "Authentication required."})
@@ -164,6 +195,11 @@ async def enforce_http_auth(request: Request, call_next):
         for k, v in _tauri_cors_headers(origin).items():
             response.headers.append(k, v)
     return response
+
+
+def job_owner_id(request: Request) -> str:
+    """Return a scoped developer identity or the daemon administrator scope."""
+    return getattr(request.state, "job_owner_id", "admin")
 
 
 async def authorize_websocket(websocket: WebSocket) -> bool:

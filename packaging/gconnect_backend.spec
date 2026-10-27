@@ -30,6 +30,8 @@ hiddenimports = (
         "backend.file_manager",
         "backend.gpu_telemetry",
         "backend.cluster_manager",
+        "backend.access_tokens",
+        "backend.job_manager",
         "backend.linter",
         "backend.pty_bridge",
     ]
