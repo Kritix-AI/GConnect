@@ -13,6 +13,7 @@ from backend.docker_manager import docker_manager
 from backend.file_manager import router as files_router
 from backend.gpu_telemetry import gpu_telemetry_service
 from backend.linter import router as lint_router
+from backend.network_utils import get_host_network_addresses
 from backend.pty_bridge import pty_bridge
 
 
@@ -70,12 +71,18 @@ async def lifespan(app: FastAPI):
     # Single shared NVML sampler for all telemetry clients.
     await gpu_telemetry_service.start()
 
-    if settings.AUTO_START_CONTAINER and docker_manager.docker_available:
+    async def _init_container_background():
+        import asyncio
+        loop = asyncio.get_running_loop()
         try:
-            logger.info("Initializing Docker sandbox container...")
-            docker_manager.get_or_create_container()
+            logger.info("Initializing Docker sandbox container in background...")
+            await loop.run_in_executor(None, docker_manager.get_or_create_container)
         except Exception as e:
             logger.warning(f"Could not auto-start container: {e}")
+
+    if settings.AUTO_START_CONTAINER and docker_manager.docker_available:
+        import asyncio
+        asyncio.create_task(_init_container_background())
 
     yield
 
@@ -84,9 +91,9 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="GConnect - Remote GPU Development Platform",
-    description="Lightweight remote GPU development platform tailored for voice and multimodal AI pipelines.",
-    version="2.2.0",
+    title="GConnect - Universal Remote GPU Development Platform",
+    description="Universal, turnkey remote GPU sharing platform and Web IDE for PyTorch, LLMs, Computer Vision, Voice AI, and Data Science.",
+    version="2.2.1",
     lifespan=lifespan,
     # API surface is not public; docs would only help attackers.
     docs_url=None,
@@ -134,6 +141,100 @@ async def get_telemetry_snapshot():
     import asyncio
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, gpu_telemetry_service.get_snapshot)
+
+
+# ----------------------------------------------------------------------
+# Host GPU Sharing
+# ----------------------------------------------------------------------
+
+from pydantic import BaseModel  # noqa: E402
+
+
+class ConfigureTokenRequest(BaseModel):
+    token: str
+
+
+@app.get("/api/host/share-info")
+async def get_share_info():
+    """Live specs, auto-detected IPs, and connection parameters for sharing this GPU."""
+    import asyncio
+    loop = asyncio.get_running_loop()
+    telemetry = await loop.run_in_executor(None, gpu_telemetry_service.get_snapshot)
+    net_info = await loop.run_in_executor(None, get_host_network_addresses)
+
+    effective_h = settings.effective_host
+    is_sharing = settings.ALLOW_LAN or effective_h in ("0.0.0.0", "::")
+
+    return {
+        "status": "ready",
+        "network": net_info,
+        "host": effective_h,
+        "port": settings.PORT,
+        "inference_port": settings.INFERENCE_PORT,
+        "token": auth.get_token(),
+        "allow_lan": settings.ALLOW_LAN,
+        "is_sharing": is_sharing,
+        "telemetry": telemetry,
+        "docker_status": docker_manager.get_status(),
+    }
+
+
+@app.post("/api/host/configure-token")
+def configure_token(req: ConfigureTokenRequest):
+    """Sets a custom access token for teammate sharing."""
+    new_token = req.token.strip()
+    if not new_token or len(new_token) < 4:
+        raise HTTPException(status_code=400, detail="Token must be at least 4 characters.")
+    auth._token = new_token
+    token_file = settings.RUNTIME_DIR / "auth_token"
+    auth._write_token_file(token_file, new_token)
+    return {"status": "success", "token": new_token}
+
+
+@app.post("/api/host/firewall-rule")
+def trigger_firewall_rule():
+    """Triggers an elevated Windows prompt to allow inbound traffic on ports 8000 & 8001."""
+    import sys
+    if sys.platform != "win32":
+        return {"status": "skipped", "message": "Firewall configuration only needed on Windows."}
+    import subprocess
+    cmd = (
+        'Start-Process netsh -Verb RunAs -ArgumentList '
+        '\'advfirewall firewall add rule name="GConnect Host" dir=in action=allow protocol=TCP localport=8000,8001\''
+    )
+    try:
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        subprocess.Popen(["powershell", "-NoProfile", "-Command", cmd], creationflags=flags)
+        return {"status": "success", "message": "Windows Firewall prompt launched."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/host/firewall-status")
+def get_firewall_status():
+    """Queries Windows Firewall to check if inbound rules for ports 8000 & 8001 exist."""
+    import sys
+    if sys.platform != "win32":
+        return {"status": "ok", "allowed": True, "message": "Non-Windows platform - firewall check skipped"}
+    import subprocess
+    try:
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        res = subprocess.run(
+            ["netsh", "advfirewall", "firewall", "show", "rule", 'name="GConnect Host"'],
+            capture_output=True,
+            text=True,
+            timeout=2.0,
+            creationflags=flags,
+        )
+        allowed = res.returncode == 0 and "Action: Allow" in res.stdout or "Allow" in res.stdout
+        return {
+            "status": "ok",
+            "allowed": allowed,
+            "rule_found": res.returncode == 0,
+            "message": "Firewall rule active" if allowed else "Inbound traffic rule not found",
+        }
+    except Exception as e:
+        return {"status": "unknown", "allowed": False, "message": str(e)}
 
 
 # ----------------------------------------------------------------------

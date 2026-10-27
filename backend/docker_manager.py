@@ -61,6 +61,8 @@ class DockerSandboxManager:
         self.docker_available: bool = False
         self.gpu_passthrough_available: bool = False
         self.gpu_degraded_reason: str = ""
+        self.is_pulling: bool = False
+        self.is_creating: bool = False
         self._init_docker()
 
     def _init_docker(self):
@@ -169,6 +171,12 @@ class DockerSandboxManager:
                 pass
 
             logger.info(f"Creating sandbox container '{settings.CONTAINER_NAME}' from {settings.CONTAINER_IMAGE}...")
+            self.is_creating = True
+            try:
+                self.client.images.get(settings.CONTAINER_IMAGE)
+            except Exception:
+                self.is_pulling = True
+                logger.info(f"Image '{settings.CONTAINER_IMAGE}' not cached locally. Pulling in background...")
 
             hf_home = "/root/.cache/huggingface" if settings.EPHEMERAL_MODE else "/workspace/.hf_cache"
 
@@ -201,6 +209,9 @@ class DockerSandboxManager:
         except Exception as e:
             logger.error(f"Failed to create/start Docker sandbox: {e}")
             return None
+        finally:
+            self.is_creating = False
+            self.is_pulling = False
 
     def _run_container_with_gpu_fallback(self, environment, volumes, ports, config_fp: str):
         """Try GPU-enabled creation; on daemon rejection fall back to CPU-only
@@ -265,6 +276,16 @@ class DockerSandboxManager:
         }
 
         if not self.docker_available or not self.client:
+            return status
+
+        if getattr(self, "is_pulling", False):
+            status["container_status"] = "pulling_image"
+            status["lifecycle_message"] = f"Downloading base image '{settings.CONTAINER_IMAGE}' in background..."
+            return status
+
+        if getattr(self, "is_creating", False):
+            status["container_status"] = "creating"
+            status["lifecycle_message"] = "Initializing sandbox container..."
             return status
 
         try:

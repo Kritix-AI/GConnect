@@ -115,9 +115,11 @@ fn data_dirs(app: &AppHandle) -> Result<(PathBuf, PathBuf, PathBuf), String> {
 
 /// Spawns the Python daemon sidecar, waits for /api/health, reads the token
 /// file the daemon generated, and publishes the info to the webview.
-fn start_backend(app: &AppHandle) -> Result<BackendInfo, String> {
+fn start_backend(app: &AppHandle, host_mode: bool) -> Result<BackendInfo, String> {
     let (workspace, runtime, logs) = data_dirs(app)?;
     let port = find_free_port(8000);
+    let bind_host = if host_mode { "0.0.0.0" } else { "127.0.0.1" };
+    let allow_lan = if host_mode { "true" } else { "false" };
 
     let sidecar = app
         .shell()
@@ -129,7 +131,8 @@ fn start_backend(app: &AppHandle) -> Result<BackendInfo, String> {
         .env("CONNECT_RUNTIME_DIR", &runtime)
         .env("CONNECT_LOG_DIR", &logs)
         .env("CONNECT_PORT", port.to_string())
-        .env("CONNECT_HOST", "127.0.0.1")
+        .env("CONNECT_HOST", bind_host)
+        .env("CONNECT_ALLOW_LAN", allow_lan)
         // The sidecar watches this PID and exits if the app dies without a
         // chance to run cleanup (force-kill, crash).
         .env("GCONNECT_PARENT_PID", std::process::id().to_string())
@@ -174,8 +177,9 @@ fn start_backend(app: &AppHandle) -> Result<BackendInfo, String> {
         return Err("daemon did not publish an auth token".into());
     }
 
+    let mode_str = if host_mode { "share" } else { "local" };
     let info = BackendInfo {
-        mode: "local".into(),
+        mode: mode_str.into(),
         url: format!("http://127.0.0.1:{port}"),
         token,
         port,
@@ -342,7 +346,7 @@ fn set_connection(app: AppHandle, cfg: ConnectionConfig) -> Result<BackendInfo, 
     let mut persisted = cfg;
 
     match persisted.mode.as_str() {
-        "local" => {
+        "local" | "share" => {
             persisted.url = None;
             persisted.token = None;
         }
@@ -364,7 +368,7 @@ fn set_connection(app: AppHandle, cfg: ConnectionConfig) -> Result<BackendInfo, 
             persisted.url = Some(url);
             persisted.token = Some(token);
         }
-        _ => return Err("mode must be 'local' or 'remote'".into()),
+        _ => return Err("mode must be 'local', 'remote', or 'share'".into()),
     }
 
     save_connection(&app, &persisted)?;
@@ -381,13 +385,15 @@ fn set_connection(app: AppHandle, cfg: ConnectionConfig) -> Result<BackendInfo, 
         )),
         _ => {
             let handle = app.clone();
+            let is_share = persisted.mode == "share";
             tauri::async_runtime::spawn_blocking(move || {
-                if let Err(err) = start_backend(&handle) {
+                if let Err(err) = start_backend(&handle, is_share) {
                     eprintln!("[GConnect] backend start failed: {err}");
                 }
             });
+            let mode_str = if is_share { "share" } else { "local" };
             Ok(BackendInfo {
-                mode: "local".into(),
+                mode: mode_str.into(),
                 ..unconfigured_info()
             })
         }
@@ -396,10 +402,31 @@ fn set_connection(app: AppHandle, cfg: ConnectionConfig) -> Result<BackendInfo, 
 
 #[tauri::command]
 fn restart_backend(app: AppHandle) -> Result<BackendInfo, String> {
+    let cfg = load_connection(&app);
+    let is_share = cfg.mode == "share";
     kill_backend(&app);
     *app.state::<BackendState>().info.lock().unwrap() = None;
     std::thread::sleep(Duration::from_millis(800));
-    start_backend(&app)
+    start_backend(&app, is_share)
+}
+
+#[tauri::command]
+fn request_firewall_rule() -> Result<bool, String> {
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        let script = "Start-Process netsh -Verb RunAs -ArgumentList 'advfirewall firewall add rule name=\"GConnect Host\" dir=in action=allow protocol=TCP localport=8000,8001'";
+        let _ = std::process::Command::new("powershell")
+            .args(&["-NoProfile", "-Command", script])
+            .creation_flags(0x08000000)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+        Ok(true)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Ok(true)
+    }
 }
 
 // ----------------------------------------------------------------------
@@ -514,7 +541,8 @@ fn main() {
             backend_info,
             backend_url,
             restart_backend,
-            set_connection
+            set_connection,
+            request_firewall_rule
         ])
         .setup(|app| {
             let handle = app.handle().clone();
@@ -533,7 +561,12 @@ fn main() {
                         }
                     },
                     "local" => {
-                        if let Err(err) = start_backend(&handle) {
+                        if let Err(err) = start_backend(&handle, false) {
+                            eprintln!("[GConnect] backend start failed: {err}");
+                        }
+                    }
+                    "share" => {
+                        if let Err(err) = start_backend(&handle, true) {
                             eprintln!("[GConnect] backend start failed: {err}");
                         }
                     }

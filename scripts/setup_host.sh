@@ -37,10 +37,13 @@ else
     echo "  - NVIDIA GPU: Driver not found (using simulated telemetry)"
 fi
 
-# Honor the same env vars as the daemon (see .env.example).
-HOST="${CONNECT_HOST:-127.0.0.1}"
-if [ "${CONNECT_ALLOW_LAN:-false}" = "true" ]; then
+# In host daemon mode, default to sharing across LAN/Tailscale unless overridden.
+CONNECT_ALLOW_LAN="${CONNECT_ALLOW_LAN:-true}"
+export CONNECT_ALLOW_LAN
+if [ "${CONNECT_ALLOW_LAN}" = "true" ]; then
     HOST="${CONNECT_HOST:-0.0.0.0}"
+else
+    HOST="${CONNECT_HOST:-127.0.0.1}"
 fi
 PORT="${CONNECT_PORT:-8000}"
 

@@ -1086,3 +1086,297 @@ html, body {
 .problem-item .p-icon.warning {
   color: var(--accent-amber);
 }
+
+/* ======================================================================
+   GPU Sharing Host Dashboard & Invite Styles
+   ====================================================================== */
+
+.connection-choice-highlight {
+  grid-column: span 2;
+  border-color: rgba(234, 179, 8, 0.4);
+  background: linear-gradient(135deg, rgba(234, 179, 8, 0.08) 0%, rgba(20, 24, 33, 0.95) 100%);
+}
+
+.connection-choice-highlight:hover {
+  border-color: var(--accent-amber) !important;
+  box-shadow: 0 0 12px rgba(234, 179, 8, 0.2);
+}
+
+.smart-paste-wrap {
+  margin-bottom: 8px;
+}
+
+.form-divider {
+  display: flex;
+  align-items: center;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 11px;
+  margin: 10px 0;
+}
+
+.form-divider::before,
+.form-divider::after {
+  content: "";
+  flex: 1;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.form-divider span {
+  padding: 0 8px;
+}
+
+.share-modal-card {
+  width: 580px;
+  max-width: 95vw;
+}
+
+.share-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.share-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.share-title-wrap h3 {
+  margin: 0;
+}
+
+.share-specs-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin: 16px 0;
+}
+
+.share-spec-card {
+  background-color: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.spec-label {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+}
+
+.spec-value {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-bright);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.spec-sub {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.share-firewall-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background-color: rgba(234, 179, 8, 0.1);
+  border: 1px solid rgba(234, 179, 8, 0.3);
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin-bottom: 14px;
+}
+
+.firewall-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--accent-amber);
+}
+
+.share-config-section {
+  background-color: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 14px;
+}
+
+.token-config-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.token-config-row label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.input-with-button {
+  display: flex;
+  gap: 8px;
+}
+
+.input-with-button .modal-input {
+  margin-bottom: 0;
+  flex: 1;
+}
+
+.share-action-row {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 14px;
+}
+
+.share-action-row .btn-lg {
+  padding: 10px 24px;
+  font-size: 14px;
+  font-weight: 600;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.share-invite-card {
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.08) 0%, rgba(20, 24, 33, 0.95) 100%);
+  border: 1px solid rgba(34, 197, 94, 0.4);
+  border-radius: 8px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.invite-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.beacon-pulse {
+  width: 10px;
+  height: 10px;
+  background-color: #22c55e;
+  border-radius: 50%;
+  box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7);
+  animation: beacon 1.8s infinite cubic-bezier(0.66, 0, 0, 1);
+}
+
+@keyframes beacon {
+  to {
+    box-shadow: 0 0 0 10px rgba(34, 197, 94, 0);
+  }
+}
+
+.invite-status-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #4ade80;
+}
+
+.invite-details-box {
+  background-color: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.invite-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.invite-label {
+  width: 120px;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.invite-code {
+  font-family: monospace;
+  font-size: 12px;
+  background-color: var(--bg-secondary);
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: var(--text-bright);
+  flex: 1;
+}
+
+.btn-copy-mini {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 2px 4px;
+  display: flex;
+  align-items: center;
+  transition: color 0.15s;
+}
+
+.btn-copy-mini:hover {
+  color: var(--accent-blue);
+}
+
+.btn-copy-full {
+  width: 100%;
+  justify-content: center;
+  gap: 8px;
+  font-weight: 600;
+  background-color: rgba(34, 197, 94, 0.15);
+  border-color: rgba(34, 197, 94, 0.4);
+  color: #4ade80;
+}
+
+.btn-copy-full:hover {
+  background-color: rgba(34, 197, 94, 0.25);
+  border-color: #4ade80;
+}
+
+.input-highlight-pulse {
+  border-color: #22c55e !important;
+  box-shadow: 0 0 10px rgba(34, 197, 94, 0.4) !important;
+  transition: all 0.3s ease;
+}
+
+.copy-toast {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  background-color: var(--bg-tertiary);
+  color: var(--text-bright);
+  border: 1px solid var(--border-color);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  opacity: 0;
+  transform: translateY(10px);
+  transition: opacity 0.2s, transform 0.2s;
+  z-index: 9999;
+}
+
+.copy-toast.visible {
+  opacity: 1;
+  transform: translateY(0);
+}

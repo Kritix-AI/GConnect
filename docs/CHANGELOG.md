@@ -1,5 +1,49 @@
 # GConnect Changelog
 
+## 2.2.1 (2026-10-26) - Turnkey 1-Click GPU Sharing, Real IP Invites, Single Tray & Non-blocking Docker
+
+### Turnkey GPU Sharing & Invite Generator
+- Added **"⚡ Share My GPU"** host dashboard: automatically queries system network adapters
+  and resolves the host's actual reachable IP (prioritizing Tailscale `100.x.x.x`
+  or primary LAN `192.168.x.x`). Teammate invites never output `127.0.0.1`.
+- Live host dashboard displays GPU model, VRAM totals, current network IPs, and active
+  token with a 1-click **"📋 Copy Invite for Teammate"** button.
+- Custom token support: allows hosts to configure a persistent friendly passcode directly
+  from the UI without touching `.env` files.
+- Smart Invite auto-parsing: teammates clicking "Connect to GPU" can paste the full multi-line
+  invite snippet directly into a single box; GConnect automatically extracts and populates
+  the Host URL and Token.
+
+### Mode-Driven Auto-Switching & In-App Navigation
+- Added mode-driven auto-switching in the desktop app:
+  - Choosing **"Develop on This PC"** keeps `ALLOW_LAN=false` (`127.0.0.1`) for private local development.
+  - Clicking **"⚡ Share My GPU"** acts as explicit consent: GConnect automatically launches the backend
+    with `CONNECT_ALLOW_LAN=true` and `CONNECT_HOST=0.0.0.0`.
+- Added **"Share GPU"** button to the top header actions and as a first-class choice in the
+  Connection modal (`#connectionOverlay`), allowing dynamic mode transitions without app restarts.
+
+### Windows Firewall Detection & 1-Click UAC Elevation
+- Added `/api/host/firewall-status` endpoint querying `netsh advfirewall` to verify whether inbound
+  TCP ports 8000 and 8001 are open.
+- Added `/api/host/firewall-rule` endpoint and Tauri `request_firewall_rule` IPC handler spawning
+  an elevated PowerShell UAC prompt to add firewall exceptions with one click.
+
+### Single System Tray Fix
+- Removed redundant declarative `"trayIcon"` block from `src-tauri/tauri.conf.json`.
+- Windows now registers only the single programmatic tray icon in `src-tauri/src/main.rs`,
+  resolving the issue of two tray icons appearing on startup.
+
+### Non-blocking Docker Sandbox Initialization
+- Container initialization in `backend/main.py` moved to an asynchronous background task.
+- Added cached image inspection (`docker.client.images.get`) before triggering pulls.
+- Desktop UI and Web IDE load immediately in `< 1s` without freezing during the initial
+  9.5 GB PyTorch image download.
+
+### Packaging & Test Coverage
+- Sidecar binary PyInstaller specification updated with `backend.network_utils`.
+- Full standalone NSIS installer re-compiled: `GConnect_2.2.1_x64-setup.exe` (35.18 MiB).
+- Expanded backend test suite with `tests/test_host_share.py` (58 passed, 1 skipped, 0 failures).
+
 ## 2.2.0 (2026-10-25) - Desktop remote mode, PROBLEMS panel, editor linting, honest host telemetry
 
 ### Desktop app: connect to a REMOTE GPU workstation

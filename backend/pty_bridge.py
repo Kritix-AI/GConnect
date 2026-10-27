@@ -43,11 +43,9 @@ class PTYBridge:
         else:
             logger.info("Docker container unavailable; local fallback disabled.")
             await websocket.send_text(
-                "\r\n\x1b[1;31m[Connect]\x1b[0m Docker sandbox is not running and the local "
-                "shell fallback is disabled.\r\n"
-                "\x1b[90mStart Docker Desktop / the Docker daemon, then reconnect. The fallback "
-                "can be enabled with CONNECT_ALLOW_LOCAL_FALLBACK=true (runs a HOST shell - "
-                "use only for development on loopback).\x1b[0m\r\n\r\n"
+                "\r\n\x1b[1;33m[Connect]\x1b[0m Docker sandbox is not running and local fallback is disabled (Terminal Disconnected).\r\n"
+                "\x1b[90mWorkspace files and Monaco editor are fully active on this machine.\r\n"
+                "Start Docker Desktop to enable script execution in the sandbox container.\x1b[0m\r\n\r\n"
             )
             # Application close code 4500 = "sandbox unavailable": lets the
             # frontend stop its reconnect loop instead of hammering a dead

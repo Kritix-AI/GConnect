@@ -51,12 +51,26 @@ class AppManager {
 
     this.bindEvents();
 
+    if (window.shareManager) {
+      window.shareManager.init();
+    }
+
     if (window.authManager.needsConnection()) {
-      // No connection configured (or the shell failed): show the picker and
-      // keep the managers idle. Choosing a connection reloads the page.
+      // No connection configured: show the picker
       this.showConnectionScreen(false);
       return;
     }
+
+    if (!window.authManager.isDesktop && this.btnConnection) {
+      this.btnConnection.style.display = "none";
+    }
+
+    this.ensureManagersStarted();
+  }
+
+  ensureManagersStarted() {
+    if (this._managersStarted) return;
+    this._managersStarted = true;
 
     if (!window.authManager.isDesktop && this.btnConnection) {
       this.btnConnection.style.display = "none";
@@ -185,25 +199,34 @@ class AppManager {
       const res = await window.authManager.api("/api/files");
       const data = await res.json();
       if (!data.files || data.files.length === 0) {
-        const defaultScript = `# GConnect - Remote GPU Development Platform
-# Specifically configured for PyTorch, CUDA, and Voice Agent workflows
+        const defaultScript = `# GConnect - Universal Remote GPU Development Platform
+# Production-grade environment for PyTorch, CUDA, LLMs, Computer Vision & Audio AI
 
 import os
-import torch
 
 print("========================================")
-print(" GConnect GPU Sandbox Ready")
+print(" GConnect Universal GPU Sandbox Ready")
 print("========================================")
-print(f"PyTorch Version: {torch.__version__}")
-print(f"CUDA Available:  {torch.cuda.is_available()}")
 
-if torch.cuda.is_available():
-    print(f"Device Name:     {torch.cuda.get_device_name(0)}")
-    print(f"Device Count:    {torch.cuda.device_count()}")
-    x = torch.randn(1000, 1000, device="cuda")
-    print("CUDA Matrix Allocation: SUCCESS")
+try:
+    import torch
+    print(f"PyTorch Version: {torch.__version__}")
+    print(f"CUDA Available:  {torch.cuda.is_available()}")
 
-print(f"Hugging Face Cache: {os.environ.get('HF_HOME')}")
+    if torch.cuda.is_available():
+        print(f"Device Name:     {torch.cuda.get_device_name(0)}")
+        print(f"Device Count:    {torch.cuda.device_count()}")
+        x = torch.randn(1000, 1000, device="cuda")
+        print("CUDA Matrix Allocation: SUCCESS")
+    else:
+        print("CUDA:            Unavailable (Running in CPU mode)")
+        x = torch.randn(1000, 1000)
+        print("Tensor Math:     SUCCESS (CPU)")
+except ImportError:
+    print("PyTorch:         Not installed in local Python environment.")
+    print("Note:            Run inside the GConnect Docker container (pytorch/pytorch) or 'pip install torch'.")
+
+print(f"Hugging Face Cache: {os.environ.get('HF_HOME', 'Default (~/.cache/huggingface)')}")
 print("========================================")
 `;
         await window.authManager.api("/api/files/save", {

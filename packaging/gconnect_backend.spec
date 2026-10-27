@@ -32,6 +32,7 @@ hiddenimports = (
         "backend.cluster_manager",
         "backend.linter",
         "backend.pty_bridge",
+        "backend.network_utils",
     ]
 )
 

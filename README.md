@@ -2,15 +2,15 @@
 
 # ⚡ GConnect
 
-### Personal Remote GPU Development Platform
+### Universal Remote GPU Development Platform & Web IDE
 
-**Turn any PC with an NVIDIA GPU into your private AI development studio — and pool GPUs from every PC you own into one place.**
+**Turn any PC with an NVIDIA GPU into your private, self-hosted cloud GPU studio (Colab/Vast.ai alternative) — and pool GPUs from every PC you own into one place.**
 
-[![Version](https://img.shields.io/badge/version-2.2.0-3fb950?style=flat-square)](docs/CHANGELOG.md)
-[![CI](https://github.com/Kritix-AI/GConnect/actions/workflows/ci.yml/badge.svg?branch=v1.0)](https://github.com/Kritix-AI/GConnect/actions/workflows/ci.yml)
-[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-58a6ff?style=flat-square)](#-installation)
+[![Version](https://img.shields.io/badge/version-2.2.1-3fb950?style=flat-square)](docs/CHANGELOG.md)
+[![CI](https://github.com/Kritix-AI/GConnect/actions/workflows/ci.yml/badge.svg?branch=v2)](https://github.com/Kritix-AI/GConnect/actions/workflows/ci.yml)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-58a6ff?style=flat-square)](#-installation--uninstallation)
 [![License: MIT](https://img.shields.io/badge/license-MIT-8b949e?style=flat-square)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-54%20backend%20%2B%2015%20E2E-2ea043?style=flat-square)](#-testing)
+[![Tests](https://img.shields.io/badge/tests-57%20backend%20%2B%2015%20E2E-2ea043?style=flat-square)](#-testing)
 [![Security](https://img.shields.io/badge/security%20audit-26%20issues%20fixed-f85149?style=flat-square)](docs/SECURITY_AUDIT.md)
 
 **Desktop App** · **Docker GPU Sandbox** · **Monaco IDE** · **Live Terminal** · **Real-time Telemetry** · **Multi-PC GPU Cluster**
@@ -24,9 +24,11 @@
 - [✨ What is GConnect?](#-what-is-gconnect)
 - [🌟 Features](#-features)
 - [🖥️ Screenshots](#️-screenshots)
-- [📦 Installation](#-installation)
-  - [Desktop App (Recommended)](#desktop-app-recommended)
-  - [Host Daemon Mode (Remote GPU Workstation)](#host-daemon-mode-remote-gpu-workstation)
+- [📦 Installation & Uninstallation](#-installation--uninstallation)
+  - [Desktop App (Recommended — Turnkey)](#desktop-app-recommended--turnkey)
+  - [⚡ Mode-Driven Auto-Switching](#-mode-driven-auto-switching-how-it-works)
+  - [🧹 Clean Uninstallation](#-clean-uninstallation)
+  - [Headless Host Daemon Mode (Console / Server)](#headless-host-daemon-mode-console--server)
 - [🚀 Quickstart](#-quickstart)
 - [🌐 GPU Cluster — Pool GPUs from Multiple PCs](#-gpu-cluster--pool-gpus-from-multiple-pcs)
 - [⚙️ Configuration](#️-configuration)
@@ -45,19 +47,25 @@
 
 ## ✨ What is GConnect?
 
-GConnect is a **self-hosted remote GPU development platform** built for developers who train and modify AI models — voice AI, LLMs, computer vision — on their own hardware instead of rented clouds.
+GConnect is an **open, self-hosted remote GPU development platform and Web IDE** built for developers who train, fine-tune, and run deep learning workloads on their own hardware instead of paying for rented cloud instances (Google Colab, RunPod, Vast.ai).
 
-Run the **GConnect desktop app** (or a lightweight daemon on a headless workstation), and you get:
+It works out-of-the-box for **any Python / PyTorch project**:
+- 🧠 **Large Language Models & GenAI**: Hugging Face Transformers, vLLM, Ollama, Diffusers.
+- 👁️ **Computer Vision & Perception**: YOLO, TorchVision, OpenCV, image generation pipelines.
+- 🎙️ **Speech & Multimodal AI**: Faster-Whisper, Indic-Parler-TTS, Wav2Vec2, AudioCraft.
+- 🔬 **Data Science & Machine Learning**: Scikit-learn, XGBoost, PyTorch distributed training.
 
-🖥️ **A full IDE in your browser or desktop window** — Monaco editor with multi-tab editing, auto-save with conflict protection, and one-click script execution (`Ctrl+Enter`) inside a sandboxed Docker container.
+Run the **GConnect desktop app** (or a lightweight daemon on a headless GPU server), and you get:
 
-⚡ **All your GPUs, no risk to the host** — your code runs inside a `pytorch/pytorch` container with GPU passthrough (NVIDIA Container Toolkit), 8 GB shared memory (no DataLoader bus errors), and your workspace mounted as a persistent volume.
+🖥️ **A full IDE in your browser or desktop window** — Monaco editor with multi-tab editing, Python syntax & pyflakes AST diagnostics, auto-save with conflict protection, and one-click script execution (`Ctrl+Enter`) inside a sandboxed Docker container.
 
-📊 **Real-time hardware telemetry** — live GPU utilization, VRAM, and temperature at 2 Hz from NVML, with multi-GPU and multi-PC aggregation.
+⚡ **All your GPUs, no risk to the host** — your code runs inside a `pytorch/pytorch` container with hardware GPU passthrough (`DeviceRequest` via NVIDIA Container Toolkit), 8 GB shared memory (no DataLoader bus errors), and your workspace mounted as a persistent volume.
 
-🌐 **A GPU Cluster** — register GConnect daemons running on your other PCs and see every GPU you own in one dashboard with pooled VRAM totals.
+📊 **Real-time hardware telemetry** — live GPU utilization, VRAM meters, and temperature at 2 Hz directly from NVML, with multi-GPU and multi-PC aggregation.
 
-🎙️ **Built for voice-AI pipelines** — persistent Hugging Face model cache (~9 GB downloads **once**, survives container restarts), forwarded audio-stream port for real-time inference clients, and an in-browser audio player to preview generated speech.
+🌐 **A GPU Cluster** — register GConnect daemons running on your other PCs and see every GPU you own in one dashboard with pooled VRAM totals and Ray distributed execution.
+
+💾 **Universal Model Caching & Port Forwarding** — persistent Hugging Face cache (`HF_HOME=/workspace/.hf_cache`) ensures heavy weights download **once** and survive container restarts; forwarded auxiliary port (`8001`) streams user apps (Gradio, Streamlit, FastAPI, voice inference) directly to client laptops.
 
 ---
 
@@ -66,19 +74,22 @@ Run the **GConnect desktop app** (or a lightweight daemon on a headless workstat
 | | Feature | Details |
 |---|---|---|
 | 🖥️ | **Desktop app, local OR remote** | Connection screen on first launch: run against **this PC's** sandbox or a **remote GPU workstation** (daemon URL + token) — switch anytime from the header |
+| ⚡ | **1-Click GPU Sharing & Invite Card** | Turnkey GPU sharer dashboard: auto-detects real reachable IP (Tailscale/LAN), Windows Firewall status with 1-click UAC fix, hardware specs, and 1-click copyable invite |
+| 🚀 | **Mode-Driven Auto-Switching** | "Develop on This PC" (loopback only, 127.0.0.1) vs "⚡ Share My GPU" (opt-in 0.0.0.0 public binding) — zero config files or env editing |
 | 📝 | **Monaco Code Editor** | Multi-tab, syntax highlighting for 70+ languages, debounced auto-save, **mtime-based conflict protection** (409 on external changes) |
 | 🚨 | **PROBLEMS Panel** | VS Code-style tab: Python syntax + pyflakes diagnostics as red/yellow squiggles and a clickable problem list (jumps to `file:line`), plus runtime tracebacks parsed from the terminal |
-| 🖥️ | **Interactive Terminal** | Raw Docker exec PTY piped to xterm.js — interactive prompts, `htop`, live `tqdm`, `Ctrl+C`, dynamic resize |
+| 🖥️ | **Interactive Terminal** | Raw Docker exec PTY piped to xterm.js — interactive prompts, `pip`, `htop`, live `tqdm`, `Ctrl+C`, dynamic resize |
 | ⚠️ | **Sandbox Status Banner** | Docker down? A yellow banner + Run-dialog tell you *where* and why — scripts never die silently |
 | 📊 | **Live Telemetry** | 2 Hz NVML sampling, all GPUs, self-healing stream, "NO SIGNAL"/"STALE" honesty indicators; **GPU-less machines show CPU + RAM instead** |
 | 🌐 | **GPU Cluster** | Multi-PC node registry, pooled VRAM, per-node/per-GPU stats, live status |
-| 🐳 | **Docker Sandbox** | Auto-created/reconciled container, GPU passthrough, 8 GB shm, port 8001 forwarded for audio streams |
-| 💾 | **Persistent Model Cache** | `HF_HOME=/workspace/.hf_cache` — 9 GB of models download once |
-| 🎵 | **Audio Preview** | Click any `.wav`/`.mp3`/`.ogg`/`.flac` to play it in-app — perfect for TTS output |
+| 🐳 | **Non-blocking Docker Sandbox** | Auto-created/reconciled container, GPU passthrough, 8 GB shm, background image verification without UI freeze |
+| 💾 | **Persistent Model Cache** | `HF_HOME=/workspace/.hf_cache` — weights for LLMs, diffusion models, or voice checkpoints download once |
+| 🔌 | **Auxiliary Streaming Port (8001)** | Forwarded directly into container — host a **Gradio demo**, **Streamlit app**, **FastAPI server**, or audio stream |
+| 🎵 | **In-Browser Audio Preview** | Click any `.wav`/`.mp3`/`.ogg`/`.flac` to play it in-app with waveform controls — perfect for speech AI |
 | 📐 | **Resizable Layout** | Draggable sidebar (double-click resets) and editor/terminal split — VS Code-style |
-| 📦 | **One-click Export** | Download files or the whole workspace as a streamed ZIP |
+| 📦 | **One-click Export** | Download files or the whole workspace as a streamed ZIP (excluding weights/caches) |
 | 🔐 | **Secure by Default** | Token auth everywhere, loopback-only binding, no CORS wildcards — [full audit](docs/SECURITY_AUDIT.md), [report a vulnerability](.github/SECURITY.md) |
-| 🖴️ | **System Tray** | Desktop app runs in the tray: open IDE, copy URL, restart daemon, quit |
+| 🖴️ | **Single System Tray** | Clean, single interactive system tray: open IDE, restart daemon, quit |
 | 🧹 | **Disk Cleanup** | One-click model cache wipe with honest freed-space reporting |
 | 🔌 | **Fully Offline** | All frontend libraries vendored — no CDNs, works on air-gapped networks |
 
@@ -98,46 +109,94 @@ Run the **GConnect desktop app** (or a lightweight daemon on a headless workstat
 
 ---
 
-## 📦 Installation
+## 📦 Installation & Uninstallation
 
-### Desktop App (Recommended)
+### Desktop App (Recommended — Turnkey)
 
-**Prerequisites:** Windows 10/11 (macOS/Linux: build from source), Docker Desktop *optional* (app degrades gracefully without it).
+**Prerequisites:** Windows 10/11 (macOS/Linux: build from source). Docker Desktop is recommended for container sandboxing (app degrades gracefully with clear notices if Docker is paused).
 
-1. Grab the installer from the [**Releases page**](https://github.com/Kritix-AI/GConnect/releases/latest): download **`GConnect_2.2.0_x64-setup.exe`** (verify against the SHA-256 in the release notes if you like)
-2. Run the installer — no admin rights needed
-3. Launch **GConnect**
+1. Grab the installer from the [**Releases page**](https://github.com/Kritix-AI/GConnect/releases/latest): download **`GConnect_2.2.1_x64-setup.exe`** (verify against the SHA-256 in the release notes if you like).
+2. Run the installer — zero manual terminal commands, zero batch scripts, and zero `.env` setup required.
+3. Launch **GConnect** from your Start Menu or Desktop shortcut.
 
-That's it. The app:
-- asks **where to run**: this PC (local Docker sandbox) or a remote GPU workstation (URL + token)
-- starts its private daemon on a free loopback port (skips 8001 — reserved for inference)
-- auto-generates an auth token and passes it to the UI securely (IPC, never localStorage)
-- creates its workspace at `%APPDATA%\com.gconnect.app\workspace`
-- detects Docker + NVIDIA automatically and starts your GPU sandbox
+---
 
-### Host Daemon Mode (Remote GPU Workstation)
+### ⚡ Mode-Driven Auto-Switching: How it Works
 
-Run the daemon on a headless/remote GPU machine and connect from any browser.
+When you open GConnect, you get three seamless options directly in the UI:
+
+1. **`🖥️ Develop on This PC` (Private Mode)**:
+   - Backend binds strictly to `127.0.0.1` (`CONNECT_ALLOW_LAN=false`).
+   - Completely safe and isolated for local development on your machine.
+2. **`⚡ Share My GPU` (Host Sharer Mode)**:
+   - One-click consent: GConnect automatically spins up the backend with `CONNECT_ALLOW_LAN=true` and `CONNECT_HOST=0.0.0.0`.
+   - Automatically queries your network adapters and displays your **real reachable IP** (prioritizing Tailscale `100.x.x.x`, or primary LAN `192.168.x.x`). **`127.0.0.1` is never shown to teammates in invites.**
+   - Displays live GPU model, VRAM, and Windows Firewall status (with a 1-click UAC firewall rule button).
+   - Generates a 1-click copyable invite card:
+     ```text
+     🚀 Connect to my GConnect GPU Workstation!
+     Host URL: http://<real-ip>:8000
+     Token: gconnect_sec_xxxxxx
+     ```
+3. **`🚀 Connect to GPU` (Remote Client Mode)**:
+   - Paste the host URL and token from your teammate.
+   - GConnect connects directly to the remote GPU workstation, streaming Monaco editor, file tree, GPU telemetry, and xterm terminal.
+
+> **💡 Switch Anytime:** You can toggle between "Develop on This PC", "Connect to GPU", and "Share My GPU" at any point without restarting GConnect by clicking **Connection** in the top header!
+
+---
+
+### 🧹 Clean Uninstallation
+
+GConnect adheres to standard Windows application packaging and leaves no lingering background services.
+
+#### 1. Uninstall Application
+- **Via Windows Settings:**
+  - Press `Win + I` ➔ Go to **Apps** ➔ **Installed apps** (or *Apps & features*).
+  - Search for **GConnect** ➔ Click the three dots `...` ➔ Select **Uninstall**.
+- **Via Control Panel:**
+  - Open `control.exe` ➔ Click **Programs and Features**.
+  - Right-click **GConnect** ➔ Click **Uninstall**.
+
+#### 2. Optional: Remove Configuration & App Data
+The desktop app stores its settings and user workspace at `%APPDATA%\com.gconnect.app`. To completely remove all local data:
+```powershell
+Remove-Item -Recurse -Force "$env:APPDATA\com.gconnect.app"
+```
+
+#### 3. Optional: Remove Docker Sandbox Container & Image
+If you used the local Docker GPU sandbox and want to reclaim disk space:
+```powershell
+# Remove the sandbox container
+docker rm -f connect_dev_sandbox
+
+# Remove the PyTorch CUDA base image (~9.5 GB)
+docker rmi pytorch/pytorch:latest
+```
+
+---
+
+### Headless Host Daemon Mode (Console / Server)
+
+If you are running on a headless Linux or Windows server without the desktop UI:
 
 **Windows:**
 ```cmd
-scripts\setup_host.bat                      :: console mode
+scripts\setup_host.bat                      :: automatically binds to 0.0.0.0 for LAN/Tailscale sharing
 ```
 
 **Linux / macOS:**
 ```bash
 chmod +x scripts/setup_host.sh
-./scripts/setup_host.sh
+./scripts/setup_host.sh                     :: automatically binds to 0.0.0.0 for LAN/Tailscale sharing
 ```
 
 Or manually:
 ```bash
-python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
+python -m venv .venv && source .venv/bin/activate
 pip install -r backend/requirements.txt
-python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
+python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000
 ```
-
-Then open `http://127.0.0.1:8000` locally, or see [Remote Access](#remote-access-lan--tailscale) for connecting from another PC.
 
 ---
 
@@ -148,16 +207,28 @@ Then open `http://127.0.0.1:8000` locally, or see [Remote Access](#remote-access
 3. Watch the terminal pane: PyTorch version, CUDA availability, GPU name, and a test CUDA matrix allocation
 4. The telemetry bar shows your **real GPU** — name, VRAM meter, utilization, temperature (green dot = live data)
 
-**Voice-AI pipeline (what GConnect was built for):**
-```bash
-# In the GConnect terminal (inside the container):
-python kritix_server.py
+**Universal Workload Examples:**
 
-# On your laptop (over LAN/Tailscale):
-python kritix_client.py --host <GPU_PC_IP> --port 8001
-```
+- **🧠 Train or fine-tune an LLM (Hugging Face / PyTorch):**
+  ```bash
+  # Inside the GConnect container terminal:
+  pip install transformers datasets accelerate
+  python train_model.py
+  ```
+  *(Model weights cache automatically to `/workspace/.hf_cache` so downloads are never repeated).*
 
-Generated audio files (`.wav`) appear in the file tree — click to preview them instantly.
+- **🔌 Host a live Gradio / Streamlit / FastAPI UI (Forwarded Port 8001):**
+  ```bash
+  # Run any web server inside the container on port 8001:
+  python app_gradio.py --port 8001
+  ```
+  *(Access immediately from your client laptop at `http://<GPU_PC_IP>:8001`).*
+
+- **🎙️ Voice AI & Multimodal Inference (Whisper / TTS):**
+  ```bash
+  python voice_server.py --port 8001
+  ```
+  *(Generated audio files `.wav` appear in the file tree — click any audio file to preview instantly in-browser).*
 
 ---
 
@@ -396,11 +467,15 @@ macOS/Linux: identical commands; the sidecar script auto-detects the Rust target
 
 ## 📋 API Reference
 
-Base URL: `http://127.0.0.1:<port>` — all routes except `/api/health` require the token.
+Base URL: `http://127.0.0.1:<port>` — all routes except `/api/health` and `/api/host/*` (loopback-only) require the token.
 
 | Method | Route | Purpose |
 |---|---|---|
 | `GET` | `/api/health` | Liveness probe (public) |
+| `GET` | `/api/host/share-info` | Hardware specs, detected LAN/Tailscale IPs, and auth token (loopback) |
+| `POST` | `/api/host/configure-token` | Set custom host authentication passcode (loopback) |
+| `GET` | `/api/host/firewall-status` | Check Windows Firewall status for ports 8000 & 8001 |
+| `POST` | `/api/host/firewall-rule` | Request elevated UAC firewall rule for inbound ports 8000 & 8001 |
 | `GET` | `/api/telemetry/snapshot` | Current GPU stats (all GPUs) |
 | `WS` | `/ws/telemetry` | Live telemetry stream (2 Hz) |
 | `WS` | `/ws/terminal` | Interactive container PTY (text = input, binary = control) |
@@ -462,28 +537,29 @@ The remote PC must run its daemon with `CONNECT_ALLOW_LAN=true` and you must add
 ```
 GConnect/
 ├── backend/                 # FastAPI daemon (Python)
-│   ├── auth.py              #   token auth + origin policy + Tauri CORS
+│   ├── auth.py              #   token auth + origin policy + Tauri CORS + loopback host APIs
 │   ├── cluster_manager.py   #   multi-PC GPU cluster
 │   ├── gpu_telemetry.py     #   NVML sampling + WS broadcaster + CPU/RAM fallback
 │   ├── linter.py            #   /api/lint (ast + pyflakes) for PROBLEMS
-│   ├── docker_manager.py    #   sandbox lifecycle + config reconcile
+│   ├── network_utils.py     #   Tailscale (100.x.x.x) & LAN IP discovery
+│   ├── docker_manager.py    #   sandbox lifecycle + non-blocking background verification
 │   ├── file_manager.py      #   file APIs (traversal-safe, atomic)
 │   ├── pty_bridge.py        #   WebSocket <-> container PTY
-│   └── main.py              #   app wiring
+│   └── main.py              #   app wiring + host sharing endpoints
 ├── frontend/                # IDE (vanilla JS, fully offline)
-│   ├── index.html           #   layout + modals (connection, cluster, problems)
-│   ├── css/                 #   GitHub-dark theme
-│   ├── js/                  #   auth, editor, terminal, problems, cluster, telemetry
+│   ├── index.html           #   layout + modals (connection, share, cluster, problems)
+│   ├── css/                 #   GitHub-dark theme + share overlay styling
+│   ├── js/                  #   auth, editor, terminal, share, problems, cluster, telemetry
 │   └── vendor/              #   Monaco 0.45, xterm 5.3, Lucide (pinned)
 ├── src-tauri/               # Desktop app (Rust)
-│   ├── src/main.rs          #   connection modes, sidecar lifecycle, tray, IPC
-│   ├── tauri.conf.json      #   CSP, window, bundle config
+│   ├── src/main.rs          #   mode auto-switching, sidecar lifecycle, single tray, UAC IPC
+│   ├── tauri.conf.json      #   CSP, window, single interactive tray bundle
 │   └── capabilities/        #   minimal permissions (core:default)
 ├── packaging/               # PyInstaller sidecar build
 │   ├── backend_entry.py     #   sidecar entrypoint
 │   └── gconnect_backend.spec#   spec (SPECPATH-relative, CWD-independent)
 ├── scripts/                 # setup_host (win/linux), build_sidecar
-├── tests/                   # 53 backend tests (conftest isolates everything)
+├── tests/                   # 57 backend tests (conftest isolates everything)
 ├── e2e/                     # 15 Playwright tests + webServer config
 ├── playwright.config.js     # boots a disposable daemon on :8900 per run
 ├── workspace/               # your files (mounted into the container)

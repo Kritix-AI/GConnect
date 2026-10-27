@@ -2,8 +2,8 @@
 
 ## Supported versions
 
-GConnect is a single-branch project at this stage: the latest commit on the
-default branch (`v1.0`) is the only supported version. Please make sure you
+GConnect is actively maintained on branch `v2`: the latest commit on `v2`
+is the supported release. Please make sure you are running a freshly built binary
 are running a freshly built binary (or the bundled installer from the repo
 root) before reporting an issue.
 

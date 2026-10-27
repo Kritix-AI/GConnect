@@ -75,6 +75,11 @@
 
     <!-- Actions & Run Controls -->
     <div class="header-right">
+      <button class="btn btn-secondary btn-sm" id="btnShareGPU" title="Share My GPU: allow teammates to connect to your GPU">
+        <i data-lucide="share-2"></i>
+        <span>Share GPU</span>
+      </button>
+
       <button class="btn btn-secondary btn-sm" id="btnConnection" title="Switch between this PC and a remote GPU workstation">
         <i data-lucide="plug-zap"></i>
         <span>Connection</span>
@@ -176,7 +181,7 @@
             <button class="panel-tab active" id="tabTerminal" title="Interactive terminal">
               <i data-lucide="terminal" class="tab-icon"></i>
               <span>TERMINAL</span>
-              <span class="connection-status connected" id="terminalStatusBadge">Connected</span>
+              <span class="connection-status disconnected" id="terminalStatusBadge">Disconnected</span>
             </button>
             <button class="panel-tab" id="tabProblems" title="Errors parsed from the terminal output">
               <i data-lucide="circle-alert" class="tab-icon"></i>
@@ -337,8 +342,13 @@
         </button>
         <button class="connection-choice" id="btnConnectRemote">
           <i data-lucide="server-cog" class="connection-choice-icon"></i>
-          <span class="connection-choice-title">Remote GPU PC</span>
-          <span class="connection-choice-desc">Edit and run on another machine's GPUs</span>
+          <span class="connection-choice-title">Connect to GPU</span>
+          <span class="connection-choice-desc">Client mode: connect to a teammate's GPU</span>
+        </button>
+        <button class="connection-choice connection-choice-highlight" id="btnConnectShare">
+          <i data-lucide="zap" class="connection-choice-icon text-warning"></i>
+          <span class="connection-choice-title">⚡ Share My GPU</span>
+          <span class="connection-choice-desc">Host mode: turn this PC into a GPU server for teammates</span>
         </button>
       </div>
 
@@ -346,6 +356,10 @@
       <div class="connection-error hidden" id="connectionError"></div>
 
       <div class="connection-form hidden" id="connectionForm">
+        <div class="smart-paste-wrap">
+          <input type="text" id="pasteInviteInput" class="modal-input" placeholder="📋 Quick Paste: paste full invite from teammate..." />
+        </div>
+        <div class="form-divider"><span>or enter connection details</span></div>
         <input type="text" id="connectUrlInput" class="modal-input" placeholder="http://<gpu-pc-ip-or-tailscale-host>:8000" />
         <input type="password" id="connectTokenInput" class="modal-input" placeholder="Daemon token (remote PC's CONNECT_AUTH_TOKEN)" />
         <div class="modal-actions">
@@ -361,6 +375,98 @@
 
       <div class="modal-actions">
         <button class="btn btn-secondary hidden" id="btnCancelConnection">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal for Sharing GPU (Host Dashboard) -->
+  <div class="modal-overlay hidden" id="shareOverlay">
+    <div class="modal-card share-modal-card">
+      <div class="share-modal-header">
+        <div class="share-title-wrap">
+          <i data-lucide="zap" class="text-warning"></i>
+          <h3 class="modal-title">Share My GPU</h3>
+        </div>
+        <button class="btn-icon" id="btnCloseShareModal" title="Close"><i data-lucide="x"></i></button>
+      </div>
+      <p class="modal-subtitle">Turn this PC into a dedicated remote GPU server so teammates can train, run voice pipelines, and develop remotely.</p>
+
+      <!-- Hardware Specs Card -->
+      <div class="share-specs-grid">
+        <div class="share-spec-card">
+          <span class="spec-label">GPU HARDWARE</span>
+          <span class="spec-value" id="shareGpuName">Detecting GPU...</span>
+          <span class="spec-sub" id="shareVramStatus">VRAM: Loading...</span>
+        </div>
+        <div class="share-spec-card">
+          <span class="spec-label">DOCKER SANDBOX</span>
+          <span class="spec-value" id="shareDockerStatus">Checking...</span>
+          <span class="spec-sub">Port 8001 (Audio Stream)</span>
+        </div>
+        <div class="share-spec-card">
+          <span class="spec-label">NETWORK DETECTED</span>
+          <span class="spec-value" id="shareNetworkIp">Detecting IP...</span>
+          <span class="spec-sub" id="shareNetworkType">Tailscale / LAN</span>
+        </div>
+      </div>
+
+      <!-- Windows Firewall helper -->
+      <div class="share-firewall-banner" id="shareFirewallBanner">
+        <div class="firewall-info">
+          <i data-lucide="shield-alert" class="text-warning"></i>
+          <span>Windows Firewall may block incoming connections from teammates.</span>
+        </div>
+        <button class="btn btn-secondary btn-sm" id="btnAllowFirewall">
+          <i data-lucide="shield-check"></i>
+          <span>Allow Inbound Traffic (UAC)</span>
+        </button>
+      </div>
+
+      <!-- Share Control & Token Configuration -->
+      <div class="share-config-section">
+        <div class="token-config-row">
+          <label for="shareTokenInput">Passcode / Token for Teammate:</label>
+          <div class="input-with-button">
+            <input type="text" id="shareTokenInput" class="modal-input" placeholder="e.g. Kritix123" />
+            <button class="btn btn-secondary btn-sm" id="btnSaveCustomToken" title="Update Token">Save Token</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Action Trigger -->
+      <div class="share-action-row">
+        <button class="btn btn-primary btn-lg" id="btnToggleShare">
+          <i data-lucide="play"></i>
+          <span id="btnToggleShareText">Start Sharing GPU</span>
+        </button>
+      </div>
+
+      <!-- Teammate Connection Invite Card (active when sharing) -->
+      <div class="share-invite-card hidden" id="shareInviteCard">
+        <div class="invite-header">
+          <span class="beacon-pulse"></span>
+          <span class="invite-status-title">Host Server Active — Share these details with your teammate:</span>
+        </div>
+        <div class="invite-details-box">
+          <div class="invite-row">
+            <span class="invite-label">Teammate URL:</span>
+            <code class="invite-code" id="inviteUrlDisplay">http://...</code>
+            <button class="btn-copy-mini" id="btnCopyUrl" title="Copy URL"><i data-lucide="copy"></i></button>
+          </div>
+          <div class="invite-row">
+            <span class="invite-label">Inference Stream:</span>
+            <code class="invite-code" id="invitePortDisplay">Port 8001</code>
+          </div>
+          <div class="invite-row">
+            <span class="invite-label">Access Token:</span>
+            <code class="invite-code" id="inviteTokenDisplay">...</code>
+            <button class="btn-copy-mini" id="btnCopyToken" title="Copy Token"><i data-lucide="copy"></i></button>
+          </div>
+        </div>
+        <button class="btn btn-secondary btn-copy-full" id="btnCopyFullInvite">
+          <i data-lucide="clipboard-copy"></i>
+          <span>📋 Copy Complete Invite for WhatsApp / Slack</span>
+        </button>
       </div>
     </div>
   </div>
@@ -384,6 +490,7 @@
   <script src="js/auth.js"></script>
   <script src="js/telemetry.js"></script>
   <script src="js/cluster.js"></script>
+  <script src="js/share.js"></script>
   <script src="js/editor.js"></script>
   <script src="js/problems.js"></script>
   <script src="js/terminal.js"></script>

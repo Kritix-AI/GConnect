@@ -46,18 +46,17 @@ if %ERRORLEVEL% equ 0 (
     echo   - NVIDIA GPU: Driver not found - using simulated telemetry
 )
 
-REM Honor the same env vars as the daemon (see .env.example).
-if "%CONNECT_ALLOW_LAN%"=="true" (
-    if "%CONNECT_HOST%"=="" set CONNECT_HOST=0.0.0.0
-)
-if "%CONNECT_HOST%"=="" set CONNECT_HOST=127.0.0.1
+REM Host mode defaults: enable LAN exposure so teammates can connect.
+if "%CONNECT_ALLOW_LAN%"=="" set CONNECT_ALLOW_LAN=true
+if "%CONNECT_HOST%"=="" set CONNECT_HOST=0.0.0.0
 if "%CONNECT_PORT%"=="" set CONNECT_PORT=8000
+if "%CONNECT_INFERENCE_PORT%"=="" set CONNECT_INFERENCE_PORT=8001
 
 echo.
 echo =======================================================
-echo   Starting GConnect Host Daemon...
-echo   Web IDE:             http://%CONNECT_HOST%:%CONNECT_PORT%
-echo   Inference Stream:    Port %CONNECT_INFERENCE_PORT% (Forwarded to container)
+echo   GConnect GPU Host Daemon Active!
+python -c "from backend.network_utils import get_host_network_addresses; from backend import auth; info = get_host_network_addresses(); print('  Teammate URL:     http://' + str(info['recommended_ip']) + ':%CONNECT_PORT%'); print('  Access Token:     ' + auth.get_token()); print('  Audio Stream:     Port %CONNECT_INFERENCE_PORT%')"
+echo   Local Web IDE:    http://localhost:%CONNECT_PORT%
 echo =======================================================
 echo.
 

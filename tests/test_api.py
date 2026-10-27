@@ -14,8 +14,8 @@ def test_list_files(authed_client, isolated_workspace):
 
 
 def test_file_lifecycle_and_content(authed_client, isolated_workspace):
-    test_path = "unit_test_voice_agent.py"
-    sample_content = "# PyTorch Voice Pipeline Test\nprint('Testing voice agent')"
+    test_path = "unit_test_script.py"
+    sample_content = "# Universal PyTorch Test\nprint('Testing script execution')"
 
     create_res = authed_client.post("/api/files/create", json={"path": test_path, "is_directory": False})
     assert create_res.status_code == 200

@@ -147,6 +147,17 @@ async def enforce_http_auth(request: Request, call_next):
     if is_tauri and request.method == "OPTIONS":
         return Response(status_code=204, headers=_tauri_cors_headers(origin))
 
+    # Host management endpoints: allow unrestricted on local loopback (machine owner)
+    # while still requiring authentication if accessed remotely.
+    if path.startswith("/api/host/"):
+        client_host = getattr(request.client, "host", "") if request.client else ""
+        if client_host in ("127.0.0.1", "::1", "localhost", "testclient"):
+            response = await call_next(request)
+            if is_tauri:
+                for k, v in _tauri_cors_headers(origin).items():
+                    response.headers.append(k, v)
+            return response
+
     if not auth_enabled():
         response = await call_next(request)
         if is_tauri:

@@ -95,11 +95,16 @@ class TerminalManager {
 
       this.ws.onopen = () => {
         this._connecting = false;
-        this.setStatus("connected");
         this.fit();
       };
 
       this.ws.onmessage = (event) => {
+        if (typeof event.data === "string" && event.data.includes("Docker sandbox is not running")) {
+          this.setStatus("disconnected");
+        } else {
+          this.setStatus("connected");
+        }
+
         if (this.term) {
           this.term.write(event.data);
         }
@@ -111,14 +116,13 @@ class TerminalManager {
 
       this.ws.onclose = (event) => {
         this._connecting = false;
+        this.setStatus("disconnected");
         if (event && event.code === 4500) {
           // Server says the sandbox is unavailable (no Docker): stop the
           // reconnect loop - the yellow banner + Retry button take over.
-          this.setStatus("nosandbox");
           this.ws = null;
           return;
         }
-        this.setStatus("disconnected");
         this.scheduleReconnect();
       };
 
@@ -160,9 +164,6 @@ class TerminalManager {
     if (state === "connected") {
       this.statusBadge.textContent = "Connected";
       this.statusBadge.className = "connection-status connected";
-    } else if (state === "nosandbox") {
-      this.statusBadge.textContent = "No Sandbox";
-      this.statusBadge.className = "connection-status warning";
     } else {
       this.statusBadge.textContent = "Disconnected";
       this.statusBadge.className = "connection-status disconnected";
