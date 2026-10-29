@@ -39,6 +39,14 @@
 - Desktop UI and Web IDE load immediately in `< 1s` without freezing during the initial
   9.5 GB PyTorch image download.
 
+### IDE Layout & Terminal Shortcuts
+- **Editor Tab Bar & Monaco Layout Pinning**: Fixed editor layout clipping where file tabs were pushed off-screen when scrolling down or covered the top line when scrolling up. Locked `.editor-tabs-header` at `flex: 0 0 35px; z-index: 5` and bounded `.monaco-container` with `flex: 1 1 0%; min-height: 0;` (VS Code layout pattern).
+- **Terminal Bottom Safe-Padding & Auto-Scroll**: Sized `.xterm-container` with `flex: 1 1 0%; min-height: 0; padding: 6px 10px 16px 10px;` and `lineHeight: 1.15`, preventing the last line or shell prompt from colliding with the bottom border or Windows taskbar. Automatically calls `term.scrollToBottom()` on incoming WebSocket output.
+- **Terminal Keyboard Shortcuts & Mouse Paste**:
+  - `Ctrl+C` / `Cmd+C`: Copies selected terminal text to clipboard. Passes through `SIGINT` (`^C`) if no text is selected.
+  - `Ctrl+V` / `Ctrl+Shift+V` / `Shift+Insert`: Reads clipboard and pastes directly to the terminal PTY.
+  - **Right-Click Paste**: Right-clicking inside the terminal now copies (if selection exists) or pastes clipboard content directly into the prompt (matching Windows Terminal / VS Code).
+
 ### Packaging & Test Coverage
 - Sidecar binary PyInstaller specification updated with `backend.network_utils`.
 - Full standalone NSIS installer re-compiled: `GConnect_2.2.1_x64-setup.exe` (35.18 MiB).
