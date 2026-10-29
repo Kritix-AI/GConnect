@@ -572,7 +572,7 @@ body.dark-theme {
   min-height: 0;
   width: 100%;
   height: auto;
-  padding: 4px 6px 8px 6px;
+  padding: 6px 10px 16px 10px; /* 16px bottom padding leaves clean breathing room above the taskbar */
   background-color: #000;
   overflow: hidden;
   position: relative;

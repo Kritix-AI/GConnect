@@ -18,6 +18,7 @@ class TerminalManager {
       cursorBlink: true,
       cursorStyle: "bar",
       fontSize: 13,
+      lineHeight: 1.15,
       fontFamily: "'JetBrains Mono', Consolas, 'Courier New', monospace",
       convertEol: true,
       scrollback: 10000,
