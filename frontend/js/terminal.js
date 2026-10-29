@@ -19,6 +19,8 @@ class TerminalManager {
       cursorStyle: "bar",
       fontSize: 13,
       fontFamily: "'JetBrains Mono', Consolas, 'Courier New', monospace",
+      convertEol: true,
+      scrollback: 10000,
       theme: {
         background: "#05070a",
         foreground: "#d8dee9",
@@ -44,9 +46,65 @@ class TerminalManager {
       this.term.loadAddon(new WebLinksAddon.WebLinksAddon());
     }
 
+    // Terminal Keyboard Shortcuts (Copy, Paste, SIGINT handling)
+    this.term.attachCustomKeyEventHandler((event) => {
+      // 1. Ctrl+C or Cmd+C: Copy if selection exists; otherwise pass through (SIGINT)
+      if ((event.ctrlKey || event.metaKey) && (event.key === "c" || event.key === "C")) {
+        if (this.term.hasSelection()) {
+          if (event.type === "keydown") {
+            navigator.clipboard.writeText(this.term.getSelection());
+          }
+          return false; // Don't send ^C to the pty
+        }
+        return true; // Pass through to pty to interrupt running command
+      }
+
+      // 2. Ctrl+V, Cmd+V, or Ctrl+Shift+V: Paste from clipboard
+      if ((event.ctrlKey || event.metaKey) && (event.key === "v" || event.key === "V")) {
+        if (event.type === "keydown") {
+          navigator.clipboard.readText().then((text) => {
+            if (text && this.ws && this.ws.readyState === WebSocket.OPEN) {
+              this.ws.send(text);
+            }
+          }).catch((err) => console.warn("Clipboard read error:", err));
+        }
+        return false;
+      }
+
+      // 3. Shift+Insert: Paste from clipboard
+      if (event.shiftKey && event.key === "Insert") {
+        if (event.type === "keydown") {
+          navigator.clipboard.readText().then((text) => {
+            if (text && this.ws && this.ws.readyState === WebSocket.OPEN) {
+              this.ws.send(text);
+            }
+          }).catch((err) => console.warn("Clipboard read error:", err));
+        }
+        return false;
+      }
+
+      return true;
+    });
+
     const container = document.getElementById("xtermContainer");
     if (container) {
       this.term.open(container);
+
+      // Right-click paste support (matching Windows Terminal / VS Code)
+      container.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        if (this.term.hasSelection()) {
+          navigator.clipboard.writeText(this.term.getSelection());
+          this.term.clearSelection();
+        } else {
+          navigator.clipboard.readText().then((text) => {
+            if (text && this.ws && this.ws.readyState === WebSocket.OPEN) {
+              this.ws.send(text);
+            }
+          }).catch((err) => console.warn("Clipboard read error on contextmenu:", err));
+        }
+      });
+
       setTimeout(() => this.fit(), 100);
     }
 
@@ -107,6 +165,7 @@ class TerminalManager {
 
         if (this.term) {
           this.term.write(event.data);
+          this.term.scrollToBottom();
         }
         // Feed the PROBLEMS parser (Python tracebacks in the output).
         if (window.problemsManager) {
@@ -174,6 +233,7 @@ class TerminalManager {
     if (this.fitAddon && this.term) {
       try {
         this.fitAddon.fit();
+        this.term.scrollToBottom();
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
           // Control messages travel as BINARY frames - text frames are raw
           // terminal input, so no sniffing is needed server-side.

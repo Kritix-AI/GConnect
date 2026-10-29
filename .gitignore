@@ -37,10 +37,11 @@ node_modules/
 src-tauri/target/
 src-tauri/gen/
 dist/
+*.exe
 
 # PyInstaller sidecar build output
 build/
-dist/gconnect-backend*
+
 src-tauri/binaries/
 
 # Playwright E2E
