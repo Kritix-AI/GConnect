@@ -572,7 +572,7 @@ body.dark-theme {
   min-height: 0;
   width: 100%;
   height: auto;
-  padding: 6px 10px 16px 10px; /* 16px bottom padding leaves clean breathing room above the taskbar */
+  padding: 6px 10px 10px 10px; /* Safe padding above the 24px bottom status bar */
   background-color: #000;
   overflow: hidden;
   position: relative;
@@ -1398,4 +1398,358 @@ html, body {
 .copy-toast.visible {
   opacity: 1;
   transform: translateY(0);
+}
+
+
+/* ==========================================================================
+   VS Code-style Bottom Status Bar (24px Elevation)
+   ========================================================================== */
+.app-status-bar {
+  height: 24px;
+  min-height: 24px;
+  max-height: 24px;
+  flex: 0 0 24px;
+  background-color: #161b22;
+  border-top: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  font-size: 11px;
+  color: var(--text-muted);
+  user-select: none;
+  z-index: 10;
+  box-sizing: border-box;
+}
+
+.status-bar-left,
+.status-bar-right {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.status-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  cursor: default;
+  transition: color 0.15s ease;
+}
+
+.status-item:hover {
+  color: var(--text-main);
+}
+
+.status-remote-badge {
+  color: var(--accent-blue);
+  font-weight: 500;
+}
+
+.status-icon {
+  width: 12px;
+  height: 12px;
+}
+
+/* ==========================================================================
+   Sleek Custom Scrollbars (Matching Monaco)
+   ========================================================================== */
+.xterm .xterm-viewport::-webkit-scrollbar,
+.file-tree-container::-webkit-scrollbar,
+.problems-container::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.xterm .xterm-viewport::-webkit-scrollbar-track,
+.file-tree-container::-webkit-scrollbar-track,
+.problems-container::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.xterm .xterm-viewport::-webkit-scrollbar-thumb,
+.file-tree-container::-webkit-scrollbar-thumb,
+.problems-container::-webkit-scrollbar-thumb {
+  background: rgba(110, 118, 129, 0.35);
+  border-radius: 4px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+.xterm .xterm-viewport::-webkit-scrollbar-thumb:hover,
+.file-tree-container::-webkit-scrollbar-thumb:hover,
+.problems-container::-webkit-scrollbar-thumb:hover {
+  background: rgba(110, 118, 129, 0.65);
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+.xterm .xterm-viewport,
+.file-tree-container,
+.problems-container {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(110, 118, 129, 0.35) transparent;
+}
+
+/* ==========================================================================
+   Floating Terminal Context Menu
+   ========================================================================== */
+.terminal-context-menu {
+  position: fixed;
+  z-index: 1000;
+  background-color: #161b22;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  min-width: 175px;
+  user-select: none;
+  animation: fadeIn 0.08s ease-out;
+}
+
+.context-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 4px;
+  border: none;
+  background: transparent;
+  color: var(--text-main);
+  font-size: 12px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s ease;
+}
+
+.context-menu-item:hover:not(:disabled) {
+  background-color: var(--accent-blue);
+  color: #fff;
+}
+
+.context-menu-item:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.context-menu-item:hover:not(:disabled) .context-menu-shortcut {
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.context-menu-shortcut {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.context-menu-separator {
+  height: 1px;
+  background-color: var(--border-color);
+  margin: 4px 0;
+}
+
+
+/* ==========================================================================
+   Connected Devices Card & Badges (Share My GPU)
+   ========================================================================== */
+.share-badge-count {
+  background-color: #22c55e;
+  color: #000;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 10px;
+  margin-left: 6px;
+  line-height: 14px;
+}
+
+.share-devices-card {
+  background-color: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.devices-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.devices-title-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.devices-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-bright);
+}
+
+.devices-count-badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  background-color: var(--bg-secondary);
+  color: var(--text-muted);
+  border: 1px solid var(--border-color);
+  font-weight: 500;
+}
+
+.devices-count-badge.active {
+  background-color: rgba(34, 197, 94, 0.15);
+  color: #4ade80;
+  border-color: rgba(34, 197, 94, 0.4);
+}
+
+.btn-refresh-mini {
+  background: none;
+  border: 1px solid transparent;
+  color: var(--text-muted);
+  border-radius: 4px;
+  padding: 3px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+}
+
+.btn-refresh-mini:hover {
+  color: var(--text-bright);
+  background-color: var(--bg-secondary);
+  border-color: var(--border-color);
+}
+
+.devices-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.device-empty-state {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  background-color: var(--bg-secondary);
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.device-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  transition: border-color 0.15s ease;
+}
+
+.device-item:hover {
+  border-color: rgba(88, 166, 255, 0.4);
+}
+
+.device-icon-wrap {
+  position: relative;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--bg-tertiary);
+  border-radius: 6px;
+  color: var(--accent-blue);
+  flex-shrink: 0;
+}
+
+.device-online-dot {
+  position: absolute;
+  bottom: -2px;
+  right: -2px;
+  width: 8px;
+  height: 8px;
+  background-color: #22c55e;
+  border-radius: 50%;
+  border: 2px solid var(--bg-secondary);
+  box-shadow: 0 0 4px #22c55e;
+}
+
+.device-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.device-name-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.device-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-bright);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.device-badge {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-weight: 500;
+}
+
+.device-badge.remote {
+  background-color: rgba(34, 197, 94, 0.15);
+  color: #4ade80;
+  border: 1px solid rgba(34, 197, 94, 0.3);
+}
+
+.device-badge.local {
+  background-color: rgba(88, 166, 255, 0.15);
+  color: var(--accent-blue);
+  border: 1px solid rgba(88, 166, 255, 0.3);
+}
+
+.device-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.device-ip {
+  font-family: monospace;
+  color: var(--text-main);
+}
+
+.device-separator {
+  opacity: 0.4;
+}
+
+.device-channels {
+  color: var(--accent-yellow);
 }

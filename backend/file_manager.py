@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import aiofiles
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
@@ -232,6 +232,50 @@ def create_item(req: FileCreateRequest) -> Dict[str, Any]:
         }
     except Exception:
         raise HTTPException(status_code=500, detail="Failed to create item.")
+
+@router.post("/upload")
+async def upload_files(
+    files: List[UploadFile] = File(...),
+    target_dir: str = Form(""),
+) -> Dict[str, Any]:
+    """Uploads one or more files into the workspace or a specified subfolder.
+    Enforces strict path traversal checks on destination folder and filenames."""
+    dest_dir = _resolve_safe_path(target_dir)
+    if dest_dir.is_file():
+        dest_dir = dest_dir.parent
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    base = settings.WORKSPACE_DIR.resolve()
+    uploaded: List[Dict[str, Any]] = []
+
+    for file in files:
+        safe_name = Path(file.filename or "uploaded_file").name
+        if not safe_name or safe_name in ("", ".", ".."):
+            continue
+
+        target_path = _resolve_safe_path(
+            f"{target_dir}/{safe_name}" if target_dir.strip() and target_dir.strip() != "." else safe_name
+        )
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+
+        bytes_written = 0
+        async with aiofiles.open(target_path, "wb") as out_f:
+            while chunk := await file.read(1024 * 1024):
+                await out_f.write(chunk)
+                bytes_written += len(chunk)
+
+        rel_path = str(target_path.relative_to(base)).replace("\\", "/")
+        uploaded.append({
+            "name": safe_name,
+            "path": rel_path,
+            "bytes": bytes_written,
+        })
+
+    return {
+        "status": "success",
+        "count": len(uploaded),
+        "files": uploaded,
+    }
 
 
 @router.delete("/delete")

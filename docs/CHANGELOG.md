@@ -1,5 +1,38 @@
 # GConnect Changelog
 
+## 2.2.2 (2026-10-31) - Real-time Connected Devices Tracker, Command Contrast, Status Bar & Editor Caret
+
+### Real-Time Connected Devices Tracker for GPU Sharing
+- Added thread-safe `ConnectionTracker` in `backend/connection_tracker.py` that accurately monitors all clients and devices connected to a GPU host.
+- Physical device grouping via persistent `gconnect_client_id` in `localStorage` ensures multiple tabs or terminal windows from the same teammate are accurately counted as 1 distinct device.
+- Automatic local vs remote categorization: clearly differentiates between **This PC (Host)** and **Remote Teammates** connecting over LAN or Tailscale.
+- Parses client platforms and operating systems (e.g., `Mac (Chrome)`, `Windows PC (Edge)`, `Linux (Firefox)`, `Python SDK`).
+- Live host dashboard integration: added **"Connected Devices"** card in the "Share My GPU" modal (`#shareDevicesCard`), top header action badge (`#shareBtnBadge`), and bottom status bar indicator (`#statusBarClients`).
+- Added endpoints `GET /api/host/connected-devices` and included real-time device stats in `GET /api/host/share-info`.
+
+### Terminal Visual Contrast & Command Echo
+- Colorized shell prompt (`PS1`): Bold Cyan hostname (`\e[1;36m`) + Bold Green working directory (`\e[1;32m`) + Bold White command cursor (`\e[1;37m`).
+- Output reset: Attached `trap 'printf "\e[0m"' DEBUG` in bash so typed commands display in high-contrast Bold White, while command outputs immediately print in clean, legible gray (`#c9d1d9`).
+- Host fallback support: Configured `$E[1;36m` ANSI codes for Windows `cmd.exe` and `PROMPT_COMMAND` for host bash in `backend/pty_bridge.py`.
+
+### Editor Cursor Pulse & Smooth Caret in Monaco
+- Enabled `cursorBlinking: "blink"` for a distinct, sharp visual pulse.
+- Enabled `cursorSmoothCaretAnimation: "on"` for fluid cursor movement when typing, navigating lines, or placing the caret with the mouse.
+- Unobstructed pointer events across Monaco container.
+
+### Workspace File Import Button & Multipart Upload API
+- Added **"Import File(s)"** button with `<input type="file" multiple>` in the sidebar header for 1-click workspace ingestion.
+- Implemented `POST /api/files/upload` backend endpoint with strict path traversal defense and filename sanitization.
+
+### VS Code-Style Bottom Status Bar (24px Elevation)
+- Created permanent 24px bottom status bar (`#appStatusBar`) elevating the terminal container above the Windows taskbar with zero collision.
+- Displays live cursor coordinates (`Ln X, Col Y`), encoding (`UTF-8`), language (`Python`), container sandbox status (`Docker Sandbox (Running)`), and problems count.
+
+### Smooth Terminal Scrollbar & Mouse Context Menu
+- Enabled `smoothScrollDuration: 150` in xterm.js with custom dark scrollbar styles matching Monaco.
+- Floating terminal context menu with **Copy**, **Paste**, **Select All**, and **Clear Terminal**.
+- Integrated copy-on-select functionality.
+
 ## 2.2.1 (2026-10-26) - Turnkey 1-Click GPU Sharing, Real IP Invites, Single Tray & Non-blocking Docker
 
 ### Turnkey GPU Sharing & Invite Generator

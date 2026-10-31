@@ -122,3 +122,39 @@ def test_download_file_and_workspace_zip(authed_client, isolated_workspace):
     finally:
         if test_file.exists():
             test_file.unlink()
+
+
+
+def test_upload_files_and_traversal_prevention(authed_client, isolated_workspace):
+    # Test uploading multiple files to root
+    files = [
+        ("files", ("test1.py", b"print('file1')", "text/x-python")),
+        ("files", ("test2.txt", b"hello world", "text/plain")),
+    ]
+    res = authed_client.post("/api/files/upload", files=files, data={"target_dir": ""})
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "success"
+    assert data["count"] == 2
+    assert (isolated_workspace / "test1.py").read_text(encoding="utf-8") == "print('file1')"
+    assert (isolated_workspace / "test2.txt").read_text(encoding="utf-8") == "hello world"
+
+    # Test uploading to a subfolder
+    sub_files = [
+        ("files", ("nested.py", b"print('nested')", "text/x-python")),
+    ]
+    res2 = authed_client.post("/api/files/upload", files=sub_files, data={"target_dir": "subfolder"})
+    assert res2.status_code == 200
+    assert (isolated_workspace / "subfolder" / "nested.py").read_text(encoding="utf-8") == "print('nested')"
+
+    # Test path traversal in target_dir is rejected (403)
+    bad_res = authed_client.post("/api/files/upload", files=sub_files, data={"target_dir": "../escape"})
+    assert bad_res.status_code == 403
+
+    # Test filename traversal sanitization (e.g. ../evil.py is saved safely as evil.py)
+    traversal_files = [
+        ("files", ("../../evil.py", b"evil", "text/x-python")),
+    ]
+    res3 = authed_client.post("/api/files/upload", files=traversal_files, data={"target_dir": ""})
+    assert res3.status_code == 200
+    assert (isolated_workspace / "evil.py").exists()

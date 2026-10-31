@@ -13,6 +13,8 @@ class FileTreeManager {
     this.btnNewFile = document.getElementById("btnNewFile");
     this.btnRefreshFiles = document.getElementById("btnRefreshFiles");
     this.btnExportZip = document.getElementById("btnExportZip");
+    this.btnImportFiles = document.getElementById("btnImportFiles");
+    this.fileImportInput = document.getElementById("fileImportInput");
 
     // Rename modal
     this.renameOverlay = document.getElementById("renameOverlay");
@@ -48,6 +50,41 @@ class FileTreeManager {
     if (this.btnExportZip) {
       this.btnExportZip.addEventListener("click", () => {
         window.location.href = window.authManager.urlWithToken("/api/files/download?path=");
+      });
+    }
+
+    if (this.btnImportFiles && this.fileImportInput) {
+      this.btnImportFiles.addEventListener("click", () => {
+        this.fileImportInput.click();
+      });
+
+      this.fileImportInput.addEventListener("change", async (e) => {
+        const files = e.target.files;
+        if (!files || !files.length) return;
+
+        const formData = new FormData();
+        for (let i = 0; i < files.length; i++) {
+          formData.append("files", files[i]);
+        }
+        formData.append("target_dir", "");
+
+        try {
+          const res = await window.authManager.api("/api/files/upload", {
+            method: "POST",
+            body: formData,
+          });
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            alert(`Import failed: ${err.detail || res.statusText}`);
+            return;
+          }
+          await this.loadTree();
+        } catch (err) {
+          console.error("Upload error:", err);
+          alert(`Failed to import files: ${err.message || err}`);
+        } finally {
+          this.fileImportInput.value = "";
+        }
       });
     }
 

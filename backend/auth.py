@@ -170,6 +170,15 @@ async def enforce_http_auth(request: Request, call_next):
     if not supplied or not hmac.compare_digest(supplied, expected):
         return JSONResponse(status_code=401, content={"detail": "Authentication required."})
 
+    try:
+        from backend.connection_tracker import connection_tracker
+        c_ip = getattr(request.client, "host", "") if request.client else ""
+        c_ua = request.headers.get("user-agent", "")
+        c_id = request.headers.get("x-client-id") or request.query_params.get("client_id")
+        connection_tracker.register_client(c_ip, c_ua, c_id, channel="http")
+    except Exception:
+        pass
+
     response = await call_next(request)
     if is_tauri:
         for k, v in _tauri_cors_headers(origin).items():

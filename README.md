@@ -6,7 +6,7 @@
 
 **Turn any PC with an NVIDIA GPU into your private, self-hosted cloud GPU studio (Colab/Vast.ai alternative) — and pool GPUs from every PC you own into one place.**
 
-[![Version](https://img.shields.io/badge/version-2.2.1-3fb950?style=flat-square)](docs/CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-2.2.2-3fb950?style=flat-square)](docs/CHANGELOG.md)
 [![CI](https://github.com/Kritix-AI/GConnect/actions/workflows/ci.yml/badge.svg?branch=v2)](https://github.com/Kritix-AI/GConnect/actions/workflows/ci.yml)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-58a6ff?style=flat-square)](#-installation--uninstallation)
 [![License: MIT](https://img.shields.io/badge/license-MIT-8b949e?style=flat-square)](LICENSE)
@@ -115,7 +115,7 @@ Run the **GConnect desktop app** (or a lightweight daemon on a headless GPU serv
 
 **Prerequisites:** Windows 10/11 (macOS/Linux: build from source). Docker Desktop is recommended for container sandboxing (app degrades gracefully with clear notices if Docker is paused).
 
-1. Grab the installer from the [**Releases page**](https://github.com/Kritix-AI/GConnect/releases/latest): download **`GConnect_2.2.1_x64-setup.exe`** (verify against the SHA-256 in the release notes if you like).
+1. Grab the installer from the [**Releases page**](https://github.com/Kritix-AI/GConnect/releases/latest): download **`GConnect_2.2.2_x64-setup.exe`** (verify against the SHA-256 in the release notes if you like).
 2. Run the installer — zero manual terminal commands, zero batch scripts, and zero `.env` setup required.
 3. Launch **GConnect** from your Start Menu or Desktop shortcut.
 

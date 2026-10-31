@@ -38,6 +38,15 @@ class ShareManager {
     // Client auto-paste input
     this.pasteInviteInput = document.getElementById("pasteInviteInput");
 
+    // Connected devices elements
+    this.devicesCard = document.getElementById("shareDevicesCard");
+    this.devicesCountEl = document.getElementById("shareDevicesCount");
+    this.devicesListEl = document.getElementById("shareDevicesList");
+    this.btnRefreshDevices = document.getElementById("btnRefreshDevices");
+    this.shareBtnBadge = document.getElementById("shareBtnBadge");
+    this.statusBarClients = document.getElementById("statusBarClients");
+    this.statusBarClientsText = document.getElementById("statusBarClientsText");
+
     this.shareData = null;
     this.pollInterval = null;
   }
@@ -87,12 +96,23 @@ class ShareManager {
       });
     }
 
+    if (this.btnRefreshDevices) {
+      this.btnRefreshDevices.addEventListener("click", () => this.refresh());
+    }
+
     // Check if initial mode is share
     if (window.authManager && window.authManager.mode === "share") {
       if (this.btnOpenModal) {
         this.btnOpenModal.classList.add("btn-active-share");
       }
     }
+
+    // Background status polling for active share indicators
+    setInterval(async () => {
+      if (this.shareData && this.shareData.is_sharing && (!this.overlay || this.overlay.classList.contains("hidden"))) {
+        await this.refresh();
+      }
+    }, 5000);
   }
 
   async open() {
@@ -228,6 +248,86 @@ class ShareManager {
       if (this.inviteUrlEl) this.inviteUrlEl.textContent = hostUrl;
       if (this.invitePortEl) this.invitePortEl.textContent = `Port ${d.inference_port || 8001}`;
       if (this.inviteTokenEl) this.inviteTokenEl.textContent = d.token || "";
+    }
+
+    // 6. Connected Devices
+    const connDevices = d.connected_devices || { total_devices: 0, remote_devices: 0, devices: [] };
+    const remoteCount = connDevices.remote_devices || 0;
+
+    // Header Badge on Share GPU button
+    if (this.shareBtnBadge) {
+      if (isSharing && remoteCount > 0) {
+        this.shareBtnBadge.textContent = String(remoteCount);
+        this.shareBtnBadge.classList.remove("hidden");
+      } else {
+        this.shareBtnBadge.classList.add("hidden");
+      }
+    }
+
+    // Status Bar indicator
+    if (this.statusBarClients) {
+      if (isSharing) {
+        this.statusBarClients.classList.remove("hidden");
+        if (this.statusBarClientsText) {
+          this.statusBarClientsText.textContent = `${remoteCount} Remote Teammate${remoteCount === 1 ? "" : "s"}`;
+        }
+      } else {
+        this.statusBarClients.classList.add("hidden");
+      }
+    }
+
+    // Modal Connected Devices Card
+    if (this.devicesCard) {
+      this.devicesCard.classList.toggle("hidden", !isSharing);
+    }
+    if (this.devicesCountEl) {
+      this.devicesCountEl.textContent = `${remoteCount} Remote Connected`;
+      this.devicesCountEl.classList.toggle("active", remoteCount > 0);
+    }
+
+    if (this.devicesListEl) {
+      if (!connDevices.devices || connDevices.devices.length === 0) {
+        this.devicesListEl.innerHTML = `
+          <div class="device-empty-state">
+            <i data-lucide="radio" class="icon-md text-muted"></i>
+            <span>No remote devices connected yet. Share the invite above with your teammate.</span>
+          </div>
+        `;
+      } else {
+        let html = "";
+        for (const dev of connDevices.devices) {
+          const isLocal = dev.is_local;
+          const badgeClass = isLocal ? "local" : "remote";
+          const badgeText = isLocal ? "This PC" : "Remote Teammate";
+          const devName = dev.name || "Connected Device";
+          const iconName = devName.toLowerCase().includes("mac") ? "laptop" : (isLocal ? "monitor" : "laptop");
+          const channelsStr = (dev.channels || []).map((c) => c.charAt(0).toUpperCase() + c.slice(1)).join(", ") || "Active";
+
+          html += `
+            <div class="device-item">
+              <div class="device-icon-wrap">
+                <i data-lucide="${iconName}" class="device-type-icon"></i>
+                <span class="device-online-dot"></span>
+              </div>
+              <div class="device-info">
+                <div class="device-name-row">
+                  <span class="device-name">${escapeHtml(devName)}</span>
+                  <span class="device-badge ${badgeClass}">${badgeText}</span>
+                </div>
+                <div class="device-meta-row">
+                  <span class="device-ip">${escapeHtml(dev.ip || "unknown")}</span>
+                  <span class="device-separator">•</span>
+                  <span class="device-channels">${escapeHtml(channelsStr)}</span>
+                  <span class="device-separator">•</span>
+                  <span class="device-time">Active now</span>
+                </div>
+              </div>
+            </div>
+          `;
+        }
+        this.devicesListEl.innerHTML = html;
+      }
+      if (window.lucide) window.lucide.createIcons();
     }
   }
 

@@ -36,7 +36,8 @@ class EditorManager {
           fontFamily: "'JetBrains Mono', Consolas, monospace",
           minimap: { enabled: true },
           scrollBeyondLastLine: false,
-          cursorBlinking: "smooth",
+          cursorBlinking: "blink",
+          cursorSmoothCaretAnimation: "on",
           smoothScrolling: true,
           renderWhitespace: "selection",
           lineNumbers: "on",
@@ -48,6 +49,13 @@ class EditorManager {
         this.markTabDirty(this.activeTabPath, true);
         this.scheduleAutoSave(this.activeTabPath);
         this.scheduleLint();
+      });
+
+      this.editor.onDidChangeCursorPosition((e) => {
+        const cursorEl = document.getElementById("statusBarCursor");
+        if (cursorEl && e.position) {
+          cursorEl.textContent = `Ln ${e.position.lineNumber}, Col ${e.position.column}`;
+        }
       });
 
       this.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
@@ -148,6 +156,12 @@ class EditorManager {
     this.updateSaveStatus(tab.isDirty);
     this.renderTabs();
     this.scheduleLint(250);
+
+    const langEl = document.getElementById("statusBarLang");
+    if (langEl && tab.model) {
+      const modeId = tab.model.getLanguageId();
+      langEl.textContent = modeId.charAt(0).toUpperCase() + modeId.slice(1);
+    }
 
     if (window.fileTreeManager && typeof window.fileTreeManager.setActivePath === "function") {
       window.fileTreeManager.setActivePath(path);

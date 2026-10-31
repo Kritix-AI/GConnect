@@ -106,16 +106,32 @@ class AuthManager {
     sessionStorage.removeItem("gconnect_token");
   }
 
+  getClientId() {
+    let id = null;
+    try {
+      id = localStorage.getItem("gconnect_client_id");
+      if (!id) {
+        id = "client-" + Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
+        localStorage.setItem("gconnect_client_id", id);
+      }
+    } catch (_) {
+      id = id || "client-ephemeral";
+    }
+    return id;
+  }
+
   /** fetch() wrapper: absolute URL + Authorization header; on 401 in browser
    * mode, prompts for the token once and retries. */
   async api(path, options = {}) {
     await this.ready();
+    const clientId = this.getClientId();
     const doFetch = () =>
       fetch(this.base + path, {
         ...options,
         headers: {
           ...(options.headers || {}),
           ...(this.token ? { Authorization: `Bearer ${this.token}` } : {}),
+          "X-Client-Id": clientId,
         },
       });
 
@@ -135,13 +151,19 @@ class AuthManager {
     return this.base + path + (this.token ? `${sep}token=${encodeURIComponent(this.token)}` : "");
   }
 
-  /** WebSocket URL with token query param. */
+  /** WebSocket URL with token query param and client_id. */
   wsUrl(path) {
     const base = this.base || `${location.protocol}//${location.host}`;
     const proto = base.startsWith("https") ? "wss:" : "ws:";
     const hostPart = base.replace(/^https?:/, proto);
     const sep = path.includes("?") ? "&" : "?";
-    return hostPart + path + (this.token ? `${sep}token=${encodeURIComponent(this.token)}` : "");
+    const clientId = this.getClientId();
+    let url = hostPart + path + (this.token ? `${sep}token=${encodeURIComponent(this.token)}` : "");
+    if (clientId) {
+      const qSep = url.includes("?") ? "&" : "?";
+      url += `${qSep}client_id=${encodeURIComponent(clientId)}`;
+    }
+    return url;
   }
 }
 

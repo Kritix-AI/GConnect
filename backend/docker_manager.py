@@ -413,6 +413,11 @@ class DockerSandboxManager:
 
         hf_home = "/root/.cache/huggingface" if settings.EPHEMERAL_MODE else "/workspace/.hf_cache"
 
+        prompt_cmd = (
+            'PS1="\\[\\e[1;36m\\]gconnect\\[\\e[0m\\]:\\[\\e[1;32m\\]\\w\\[\\e[0m\\]\\$ \\[\\e[1;37m\\]"; '
+            'trap \'printf "\\e[0m"\' DEBUG'
+        )
+
         try:
             exec_instance = self.client.api.exec_create(
                 container=container.id,
@@ -421,7 +426,11 @@ class DockerSandboxManager:
                 stdout=True,
                 stderr=True,
                 tty=True,
-                environment={"TERM": "xterm-256color", "HF_HOME": hf_home}
+                environment={
+                    "TERM": "xterm-256color",
+                    "HF_HOME": hf_home,
+                    "PROMPT_COMMAND": prompt_cmd,
+                }
             )
             exec_id = exec_instance["Id"]
             sock = self.client.api.exec_start(exec_id, socket=True, tty=True)

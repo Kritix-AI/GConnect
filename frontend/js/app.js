@@ -459,8 +459,29 @@ print("========================================")
   }
 
   updateBanner() {
-    if (!this.dockerBanner) return;
     const ok = this.sandboxOk();
+
+    // Update Bottom Status Bar indicators
+    const sbDocker = document.getElementById("statusBarDockerText");
+    if (sbDocker) {
+      if (ok) {
+        sbDocker.textContent = "Docker Sandbox (Running)";
+        sbDocker.style.color = "var(--accent-green)";
+      } else if (this.containerStatus && this.containerStatus.container_status === "pulling_image") {
+        sbDocker.textContent = "Docker (Downloading Image...)";
+        sbDocker.style.color = "var(--accent-yellow)";
+      } else {
+        sbDocker.textContent = "Docker Sandbox (Offline)";
+        sbDocker.style.color = "var(--text-muted)";
+      }
+    }
+
+    const sbRemote = document.getElementById("statusBarRemoteText");
+    if (sbRemote) {
+      sbRemote.textContent = window.authManager.mode === "remote" ? "GConnect Remote" : "GConnect (This PC)";
+    }
+
+    if (!this.dockerBanner) return;
     const show = !ok && !this.bannerDismissed;
     this.dockerBanner.classList.toggle("hidden", !show);
     if (!show) return;

@@ -152,6 +152,10 @@ class ProblemsManager {
       this.countBadge.textContent = String(this.problems.length);
       this.countBadge.classList.toggle("hidden", this.problems.length === 0);
     }
+    const statusProblems = document.getElementById("statusBarProblemsText");
+    if (statusProblems) {
+      statusProblems.textContent = `${this.problems.length} Problem${this.problems.length === 1 ? "" : "s"}`;
+    }
     if (!this.container) return;
 
     this.container.innerHTML = "";

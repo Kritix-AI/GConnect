@@ -8,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 
 from backend import auth
 from backend.cluster_manager import cluster_manager
+from backend.connection_tracker import connection_tracker
 from backend.config import settings
 from backend.docker_manager import docker_manager
 from backend.file_manager import router as files_router
@@ -93,7 +94,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="GConnect - Universal Remote GPU Development Platform",
     description="Universal, turnkey remote GPU sharing platform and Web IDE for PyTorch, LLMs, Computer Vision, Voice AI, and Data Science.",
-    version="2.2.1",
+    version="2.2.2",
     lifespan=lifespan,
     # API surface is not public; docs would only help attackers.
     docs_url=None,
@@ -176,6 +177,7 @@ async def get_share_info():
         "is_sharing": is_sharing,
         "telemetry": telemetry,
         "docker_status": docker_manager.get_status(),
+        "connected_devices": connection_tracker.get_connected_devices(),
     }
 
 
@@ -208,6 +210,12 @@ def trigger_firewall_rule():
         return {"status": "success", "message": "Windows Firewall prompt launched."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/host/connected-devices")
+def get_connected_devices():
+    """Returns real-time information about devices currently connected to this host."""
+    return connection_tracker.get_connected_devices()
 
 
 @app.get("/api/host/firewall-status")
@@ -289,12 +297,26 @@ async def websocket_telemetry(websocket: WebSocket):
     if not await auth.authorize_websocket(websocket):
         return
     await websocket.accept()
-    await gpu_telemetry_service.stream_telemetry(websocket)
+    c_ip = websocket.client.host if websocket.client else "unknown"
+    c_ua = websocket.headers.get("user-agent", "")
+    c_id = websocket.query_params.get("client_id")
+    connection_tracker.register_client(c_ip, c_ua, c_id, channel="telemetry", socket_obj=websocket)
+    try:
+        await gpu_telemetry_service.stream_telemetry(websocket)
+    finally:
+        connection_tracker.unregister_socket(websocket, channel="telemetry")
 
 
 @app.websocket("/ws/terminal")
 async def websocket_terminal(websocket: WebSocket):
-    await pty_bridge.handle_websocket(websocket)
+    c_ip = websocket.client.host if websocket.client else "unknown"
+    c_ua = websocket.headers.get("user-agent", "")
+    c_id = websocket.query_params.get("client_id")
+    connection_tracker.register_client(c_ip, c_ua, c_id, channel="terminal", socket_obj=websocket)
+    try:
+        await pty_bridge.handle_websocket(websocket)
+    finally:
+        connection_tracker.unregister_socket(websocket, channel="terminal")
 
 
 if FRONTEND_DIR.exists():

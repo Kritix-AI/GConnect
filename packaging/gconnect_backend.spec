@@ -33,6 +33,7 @@ hiddenimports = (
         "backend.linter",
         "backend.pty_bridge",
         "backend.network_utils",
+        "backend.connection_tracker",
     ]
 )
 

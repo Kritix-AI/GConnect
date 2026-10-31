@@ -153,13 +153,23 @@ class PTYBridge:
         )
         await websocket.send_text(intro)
 
+        env = dict(os.environ)
+        if sys.platform == "win32":
+            env["PROMPT"] = "$E[1;36mgconnect$E[0m:$E[1;32m$P$E[0m$G $E[1;37m"
+        else:
+            env["PROMPT_COMMAND"] = (
+                'PS1="\\[\\e[1;36m\\]gconnect\\[\\e[0m\\]:\\[\\e[1;32m\\]\\w\\[\\e[0m\\]\\$ \\[\\e[1;37m\\]"; '
+                'trap \'printf "\\e[0m"\' DEBUG'
+            )
+
         try:
             proc = await asyncio.create_subprocess_shell(
                 shell_cmd,
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                cwd=workspace_dir
+                cwd=workspace_dir,
+                env=env,
             )
         except Exception as e:
             await websocket.send_text(f"\r\n\x1b[1;31mFailed to start shell: {e}\x1b[0m\r\n")

@@ -22,11 +22,14 @@ class TerminalManager {
       fontFamily: "'JetBrains Mono', Consolas, 'Courier New', monospace",
       convertEol: true,
       scrollback: 10000,
+      smoothScrollDuration: 150,
+      scrollSensitivity: 1,
+      fastScrollSensitivity: 5,
       theme: {
         background: "#05070a",
-        foreground: "#d8dee9",
+        foreground: "#c9d1d9",
         cursor: "#58a6ff",
-        selectionBackground: "rgba(88, 166, 255, 0.3)",
+        selectionBackground: "rgba(88, 166, 255, 0.35)",
         black: "#1e222a",
         red: "#f85149",
         green: "#2ea043",
@@ -34,7 +37,7 @@ class TerminalManager {
         blue: "#58a6ff",
         magenta: "#bc8cff",
         cyan: "#39c5cf",
-        white: "#e6edf3",
+        white: "#ffffff",
       },
     });
 
@@ -91,18 +94,92 @@ class TerminalManager {
     if (container) {
       this.term.open(container);
 
-      // Right-click paste support (matching Windows Terminal / VS Code)
-      container.addEventListener("contextmenu", (e) => {
-        e.preventDefault();
-        if (this.term.hasSelection()) {
-          navigator.clipboard.writeText(this.term.getSelection());
-          this.term.clearSelection();
-        } else {
-          navigator.clipboard.readText().then((text) => {
-            if (text && this.ws && this.ws.readyState === WebSocket.OPEN) {
-              this.ws.send(text);
+      // Terminal Context Menu setup
+      const contextMenu = document.getElementById("terminalContextMenu");
+      const btnCopy = document.getElementById("ctxMenuCopy");
+      const btnPaste = document.getElementById("ctxMenuPaste");
+      const btnSelectAll = document.getElementById("ctxMenuSelectAll");
+      const btnClear = document.getElementById("ctxMenuClear");
+
+      const hideContextMenu = () => {
+        if (contextMenu && !contextMenu.classList.contains("hidden")) {
+          contextMenu.classList.add("hidden");
+        }
+      };
+
+      if (contextMenu) {
+        container.addEventListener("contextmenu", (e) => {
+          e.preventDefault();
+          const hasSel = this.term.hasSelection();
+          if (btnCopy) btnCopy.disabled = !hasSel;
+
+          const menuWidth = 185;
+          const menuHeight = 150;
+          let x = e.clientX;
+          let y = e.clientY;
+          if (x + menuWidth > window.innerWidth) x = window.innerWidth - menuWidth - 8;
+          if (y + menuHeight > window.innerHeight) y = window.innerHeight - menuHeight - 8;
+
+          contextMenu.style.left = `${Math.max(8, x)}px`;
+          contextMenu.style.top = `${Math.max(8, y)}px`;
+          contextMenu.classList.remove("hidden");
+          if (window.lucide) lucide.createIcons();
+        });
+
+        if (btnCopy) {
+          btnCopy.addEventListener("click", () => {
+            if (this.term.hasSelection()) {
+              navigator.clipboard.writeText(this.term.getSelection());
             }
-          }).catch((err) => console.warn("Clipboard read error on contextmenu:", err));
+            hideContextMenu();
+          });
+        }
+
+        if (btnPaste) {
+          btnPaste.addEventListener("click", () => {
+            navigator.clipboard.readText().then((text) => {
+              if (text && this.ws && this.ws.readyState === WebSocket.OPEN) {
+                this.ws.send(text);
+              }
+            }).catch((err) => console.warn("Clipboard read error:", err));
+            hideContextMenu();
+          });
+        }
+
+        if (btnSelectAll) {
+          btnSelectAll.addEventListener("click", () => {
+            this.term.selectAll();
+            hideContextMenu();
+          });
+        }
+
+        if (btnClear) {
+          btnClear.addEventListener("click", () => {
+            this.clear();
+            hideContextMenu();
+          });
+        }
+
+        window.addEventListener("click", (e) => {
+          if (!contextMenu.contains(e.target)) {
+            hideContextMenu();
+          }
+        });
+
+        window.addEventListener("keydown", (e) => {
+          if (e.key === "Escape") {
+            hideContextMenu();
+          }
+        });
+      }
+
+      // Copy-on-select support: highlight text to copy automatically
+      this.term.onSelectionChange(() => {
+        if (this.term.hasSelection()) {
+          const selected = this.term.getSelection();
+          if (selected && selected.trim()) {
+            navigator.clipboard.writeText(selected).catch(() => {});
+          }
         }
       });
 

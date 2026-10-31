@@ -78,6 +78,7 @@
       <button class="btn btn-secondary btn-sm" id="btnShareGPU" title="Share My GPU: allow teammates to connect to your GPU">
         <i data-lucide="share-2"></i>
         <span>Share GPU</span>
+        <span class="share-badge-count hidden" id="shareBtnBadge">0</span>
       </button>
 
       <button class="btn btn-secondary btn-sm" id="btnConnection" title="Switch between this PC and a remote GPU workstation">
@@ -127,6 +128,10 @@
           WORKSPACE
         </span>
         <div class="sidebar-actions">
+          <button class="icon-btn" id="btnImportFiles" title="Import File(s) into Workspace">
+            <i data-lucide="upload" class="icon-sm"></i>
+          </button>
+          <input type="file" id="fileImportInput" multiple style="display: none;" />
           <button class="icon-btn" id="btnExportZip" title="Export Workspace as ZIP">
             <i data-lucide="archive" class="icon-sm"></i>
           </button>
@@ -202,6 +207,34 @@
       </div>
     </section>
   </main>
+
+  <!-- VS Code-style Bottom Status Bar -->
+  <footer class="app-status-bar" id="appStatusBar">
+    <div class="status-bar-left">
+      <span class="status-item status-remote-badge" id="statusBarRemote" title="Connection Mode">
+        <i data-lucide="radio" class="status-icon"></i>
+        <span id="statusBarRemoteText">GConnect Remote</span>
+      </span>
+      <span class="status-item" id="statusBarDocker" title="Docker Container Status">
+        <i data-lucide="container" class="status-icon"></i>
+        <span id="statusBarDockerText">Docker Sandbox</span>
+      </span>
+      <span class="status-item" id="statusBarProblems" title="Problems detected in terminal stream">
+        <i data-lucide="circle-alert" class="status-icon"></i>
+        <span id="statusBarProblemsText">0 Problems</span>
+      </span>
+      <span class="status-item hidden" id="statusBarClients" title="Connected Teammates">
+        <i data-lucide="users" class="status-icon"></i>
+        <span id="statusBarClientsText">0 Devices</span>
+      </span>
+    </div>
+    <div class="status-bar-right">
+      <span class="status-item" id="statusBarCursor" title="Cursor Line and Column">Ln 1, Col 1</span>
+      <span class="status-item" id="statusBarEncoding">UTF-8</span>
+      <span class="status-item" id="statusBarLang">Python</span>
+      <span class="status-item status-port" title="Inference Stream Port">Port: 8001</span>
+    </div>
+  </footer>
 
   <!-- Modal for Creating New File -->
   <div class="modal-overlay hidden" id="modalOverlay">
@@ -468,6 +501,26 @@
           <span>📋 Copy Complete Invite for WhatsApp / Slack</span>
         </button>
       </div>
+
+      <!-- Connected Clients / Devices Card -->
+      <div class="share-devices-card" id="shareDevicesCard">
+        <div class="devices-header">
+          <div class="devices-title-group">
+            <i data-lucide="users" class="icon-sm text-accent"></i>
+            <span class="devices-title">Connected Devices</span>
+            <span class="devices-count-badge" id="shareDevicesCount">0 Connected</span>
+          </div>
+          <button class="btn-refresh-mini" id="btnRefreshDevices" title="Refresh Connected Devices">
+            <i data-lucide="rotate-cw" class="icon-xs"></i>
+          </button>
+        </div>
+        <div class="devices-list" id="shareDevicesList">
+          <div class="device-empty-state">
+            <i data-lucide="radio" class="icon-md text-muted"></i>
+            <span>No remote devices connected yet. Share the invite above with your teammate.</span>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -484,6 +537,30 @@
         <button class="btn btn-primary" id="btnConfirmAuth">Connect</button>
       </div>
     </div>
+  </div>
+
+  <!-- Floating Terminal Context Menu -->
+  <div class="terminal-context-menu hidden" id="terminalContextMenu">
+    <button class="context-menu-item" id="ctxMenuCopy">
+      <i data-lucide="copy" class="icon-xs"></i>
+      <span>Copy</span>
+      <span class="context-menu-shortcut">Ctrl+C</span>
+    </button>
+    <button class="context-menu-item" id="ctxMenuPaste">
+      <i data-lucide="clipboard-paste" class="icon-xs"></i>
+      <span>Paste</span>
+      <span class="context-menu-shortcut">Ctrl+V</span>
+    </button>
+    <div class="context-menu-separator"></div>
+    <button class="context-menu-item" id="ctxMenuSelectAll">
+      <i data-lucide="check-square" class="icon-xs"></i>
+      <span>Select All</span>
+    </button>
+    <button class="context-menu-item" id="ctxMenuClear">
+      <i data-lucide="trash-2" class="icon-xs"></i>
+      <span>Clear Terminal</span>
+      <span class="context-menu-shortcut">Ctrl+L</span>
+    </button>
   </div>
 
   <!-- Scripts -->
