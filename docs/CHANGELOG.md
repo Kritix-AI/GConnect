@@ -2,6 +2,11 @@
 
 ## 2.2.2 (2026-10-31) - Self-Healing Docker, Connected Devices, CORS Fix & IDE Enhancements
 
+### GPU Share Toggle Resilience & Token Persistence
+- **Fixed 'Applying Configuration...' Freeze**: `frontend/js/share.js` now awaits `window.__TAURI__.core.invoke("backend_info")` to ensure the sidecar has restarted and passed its health check before refreshing dashboard state, updating credentials cleanly.
+- **Port 8000 Release Cooldown**: In `src-tauri/src/main.rs`, added an 800ms cooldown before restarting the backend on mode changes, allowing the Windows socket stack to release port 8000.
+- **Auth Token File Reuse**: In `backend/auth.py`, `get_token()` now reuses the existing `auth_token` file if present rather than overwriting it, preserving credentials across sidecar restarts.
+
 ### Self-Healing Docker Dynamic Reconnect
 - Added automatic detection of Docker daemon when launched *after* GConnect boots via `_ensure_docker()`.
 - Added dynamic reconnect hooks in `get_status()`, `get_or_create_container()`, and `restart_container()`.

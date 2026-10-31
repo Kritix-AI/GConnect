@@ -71,14 +71,22 @@ def get_token() -> str:
                 )
             _token = configured
         else:
-            _token = secrets.token_urlsafe(32)
             token_file = settings.RUNTIME_DIR / "auth_token"
-            _write_token_file(token_file, _token)
-            logger.info(
-                "Generated auth token and stored it at %s "
-                "(set CONNECT_AUTH_TOKEN to use a fixed token).",
-                token_file,
-            )
+            if token_file.is_file():
+                try:
+                    existing = token_file.read_text(encoding="utf-8").strip()
+                    if existing:
+                        _token = existing
+                except Exception:
+                    pass
+            if _token is None:
+                _token = secrets.token_urlsafe(32)
+                _write_token_file(token_file, _token)
+                logger.info(
+                    "Generated auth token and stored it at %s "
+                    "(set CONNECT_AUTH_TOKEN to use a fixed token).",
+                    token_file,
+                )
     return _token
 
 

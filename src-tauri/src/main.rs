@@ -387,6 +387,7 @@ fn set_connection(app: AppHandle, cfg: ConnectionConfig) -> Result<BackendInfo, 
             let handle = app.clone();
             let is_share = persisted.mode == "share";
             tauri::async_runtime::spawn_blocking(move || {
+                std::thread::sleep(Duration::from_millis(800));
                 if let Err(err) = start_backend(&handle, is_share) {
                     eprintln!("[GConnect] backend start failed: {err}");
                 }

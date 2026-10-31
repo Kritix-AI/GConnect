@@ -337,12 +337,15 @@ class ShareManager {
 
     if (window.authManager && window.authManager.isDesktop) {
       try {
-        const info = await window.authManager.setConnection("share");
-        if (info && info.url) {
-          window.authManager.base = info.url;
-          window.authManager.token = info.token;
-          window.authManager.mode = info.mode;
-          window.authManager.unconfigured = false;
+        await window.authManager.setConnection("share");
+        if (window.__TAURI__ && window.__TAURI__.core) {
+          const info = await window.__TAURI__.core.invoke("backend_info");
+          if (info && info.url) {
+            window.authManager.base = info.url;
+            window.authManager.token = info.token;
+            window.authManager.mode = info.mode;
+            window.authManager.unconfigured = false;
+          }
         }
       } catch (err) {
         console.error("Failed to set share connection:", err);
@@ -364,10 +367,35 @@ class ShareManager {
         if (this.btnToggleShareText) {
           this.btnToggleShareText.textContent = "Applying Configuration...";
         }
+        if (this.btnToggleShare) {
+          this.btnToggleShare.disabled = true;
+        }
+
+        // 1. Tell Tauri to switch mode and restart the backend sidecar
         await window.authManager.setConnection(targetMode);
-        setTimeout(() => this.refresh(), 1000);
+
+        // 2. Await Tauri's backend_info which polls until the sidecar is healthy
+        if (window.__TAURI__ && window.__TAURI__.core) {
+          const info = await window.__TAURI__.core.invoke("backend_info");
+          if (info && info.url) {
+            window.authManager.base = info.url;
+            window.authManager.token = info.token;
+            window.authManager.mode = info.mode;
+            window.authManager.unconfigured = false;
+          }
+        }
+
+        // 3. Refresh share data with the newly updated credentials
+        await this.refresh();
       } catch (err) {
         alert("Failed to toggle sharing mode: " + err);
+        if (this.btnToggleShareText) {
+          this.btnToggleShareText.textContent = isCurrentlySharing ? "Stop Sharing GPU" : "Start Sharing GPU";
+        }
+      } finally {
+        if (this.btnToggleShare) {
+          this.btnToggleShare.disabled = false;
+        }
       }
     } else {
       // Browser mode: already bound, toggle container / invite card
