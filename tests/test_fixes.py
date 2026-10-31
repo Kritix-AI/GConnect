@@ -136,6 +136,7 @@ def _mgr_with_info(runtimes):
 def test_gpu_check_nvidia_runtime_detected(monkeypatch):
     from backend import docker_manager as dm
     monkeypatch.setattr(dm, "_nvidia_cdi_specs", lambda: [])
+    monkeypatch.setattr(dm, "_has_physical_nvidia_gpu", lambda: (True, "NVIDIA GeForce RTX 4090 (1 device(s))"))
     mgr = _mgr_with_info({"nvidia": {"path": "nvidia-container-runtime"}})
     mgr._check_gpu_capability()
     assert mgr.gpu_passthrough_available is True
@@ -145,6 +146,7 @@ def test_gpu_check_no_nvidia_means_unavailable(monkeypatch):
     """Regression for SEC-05: the else-branch used to set True as well."""
     from backend import docker_manager as dm
     monkeypatch.setattr(dm, "_nvidia_cdi_specs", lambda: [])
+    monkeypatch.setattr(dm, "_has_physical_nvidia_gpu", lambda: (True, "NVIDIA GeForce RTX 4090 (1 device(s))"))
     mgr = _mgr_with_info({"runc": {"path": "runc"}})
     mgr._check_gpu_capability()
     assert mgr.gpu_passthrough_available is False
@@ -154,9 +156,111 @@ def test_gpu_check_no_nvidia_means_unavailable(monkeypatch):
 def test_gpu_check_cdi_fallback(monkeypatch):
     from backend import docker_manager as dm
     monkeypatch.setattr(dm, "_nvidia_cdi_specs", lambda: ["nvidia-gpu.json"])
+    monkeypatch.setattr(dm, "_has_physical_nvidia_gpu", lambda: (True, "NVIDIA GeForce RTX 4090 (1 device(s))"))
     mgr = _mgr_with_info({"runc": {"path": "runc"}})
     mgr._check_gpu_capability()
     assert mgr.gpu_passthrough_available is True
+
+
+def test_gpu_check_nvidia_runtime_without_physical_gpu(monkeypatch):
+    """Docker runtime reports 'nvidia', but host has no physical NVIDIA adapter.
+    Must disable GPU passthrough and avoid nvidia-container-cli 500 error."""
+    from backend import docker_manager as dm
+    monkeypatch.setattr(dm, "_nvidia_cdi_specs", lambda: [])
+    monkeypatch.setattr(dm, "_has_physical_nvidia_gpu", lambda: (False, "No physical NVIDIA GPU adapter detected on host"))
+    mgr = _mgr_with_info({"nvidia": {"path": "nvidia-container-runtime"}})
+    mgr._check_gpu_capability()
+    assert mgr.gpu_passthrough_available is False
+    assert "no physical NVIDIA GPU adapter found" in mgr.gpu_degraded_reason
+
+
+def test_gpu_fallback_skips_device_request_when_no_physical_gpu(monkeypatch):
+    """Verify _run_container_with_gpu_fallback does not pass device_requests when physical GPU is missing."""
+    from backend import docker_manager as dm
+    import threading
+    mgr = dm.DockerSandboxManager.__new__(dm.DockerSandboxManager)
+    mgr.docker_available = True
+    mgr.client = MagicMock()
+    mgr.gpu_passthrough_available = True
+    mgr.gpu_degraded_reason = ""
+    mgr._init_lock = threading.Lock()
+    mgr._last_init_attempt = 0.0
+
+    monkeypatch.setattr(dm, "_has_physical_nvidia_gpu", lambda: (False, "No physical GPU"))
+    mgr.client.containers.run.return_value = MagicMock(short_id="mock_container")
+
+    mgr._run_container_with_gpu_fallback(environment={}, volumes={}, ports={}, config_fp="test_fp")
+    
+    # Assert run was called without device_requests
+    call_kwargs = mgr.client.containers.run.call_args[1]
+    assert "device_requests" not in call_kwargs
+    assert mgr.gpu_passthrough_available is False
+
+
+def test_docker_dynamic_reconnect_on_get_status(monkeypatch):
+    """When docker is offline, get_status attempts _ensure_docker and self-heals."""
+    from backend import docker_manager as dm
+    import threading
+    mgr = dm.DockerSandboxManager.__new__(dm.DockerSandboxManager)
+    mgr.docker_available = False
+    mgr.client = None
+    mgr.gpu_passthrough_available = False
+    mgr.gpu_degraded_reason = ""
+    mgr.is_pulling = False
+    mgr.is_creating = False
+    mgr._init_lock = threading.Lock()
+    mgr._last_init_attempt = 0.0
+
+    def mock_init():
+        mgr.client = MagicMock()
+        mgr.docker_available = True
+
+    monkeypatch.setattr(mgr, "_init_docker", mock_init)
+    status = mgr.get_status()
+    assert status["docker_available"] is True
+    assert mgr.docker_available is True
+
+
+def test_docker_dynamic_reconnect_on_get_or_create(monkeypatch):
+    """When docker is offline, get_or_create_container triggers forced reconnect."""
+    from backend import docker_manager as dm
+    import threading
+    mgr = dm.DockerSandboxManager.__new__(dm.DockerSandboxManager)
+    mgr.docker_available = False
+    mgr.client = None
+    mgr._init_lock = threading.Lock()
+    mgr._last_init_attempt = 0.0
+
+    reconnect_called = []
+    def mock_ensure_docker(force=False):
+        reconnect_called.append(force)
+        return False
+
+    monkeypatch.setattr(mgr, "_ensure_docker", mock_ensure_docker)
+    res = mgr.get_or_create_container()
+    assert res is None
+    assert reconnect_called == [True]
+
+
+def test_docker_disconnect_detected_on_ping_failure():
+    """When Docker daemon ping fails in get_status, docker_available flips to False."""
+    from backend import docker_manager as dm
+    import threading
+    mgr = dm.DockerSandboxManager.__new__(dm.DockerSandboxManager)
+    mgr.docker_available = True
+    mgr.client = MagicMock()
+    mgr.client.ping.side_effect = Exception("Docker daemon pipe broken")
+    mgr.gpu_passthrough_available = False
+    mgr.gpu_degraded_reason = ""
+    mgr.is_pulling = False
+    mgr.is_creating = False
+    mgr._init_lock = threading.Lock()
+    mgr._last_init_attempt = 0.0
+
+    status = mgr.get_status()
+    assert status["docker_available"] is False
+    assert mgr.docker_available is False
+    assert mgr.client is None
 
 
 # ----------------------------------------------------------------------

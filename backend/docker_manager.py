@@ -4,6 +4,9 @@ import logging
 import os
 import shutil
 import stat
+import subprocess
+import threading
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -23,6 +26,47 @@ except ImportError:
 # config changes (image, shm, ports, cache mode...) the container is recreated
 # so settings actually apply instead of being silently ignored.
 CONFIG_LABEL = "dev.gconnect.config"
+
+
+def _has_physical_nvidia_gpu() -> Tuple[bool, str]:
+    """Checks whether a physical NVIDIA GPU adapter is actually present on the host
+    before requesting GPU capabilities from Docker. This prevents the Docker daemon
+    from failing with 'nvidia-container-cli: no adapters were found' (500 error)
+    when the NVIDIA container runtime is installed on a machine without physical NVIDIA GPUs."""
+    # 1. Check via pynvml (if installed)
+    try:
+        import pynvml
+        pynvml.nvmlInit()
+        count = pynvml.nvmlDeviceGetCount()
+        if count > 0:
+            name = pynvml.nvmlDeviceGetName(pynvml.nvmlDeviceGetHandleByIndex(0))
+            name_str = name.decode("utf-8") if isinstance(name, bytes) else str(name)
+            return True, f"NVIDIA GPU detected: {name_str} ({count} device(s))"
+        return False, "NVML initialized but reported 0 GPU adapters"
+    except Exception as nvml_err:
+        logger.debug("NVML physical GPU check failed: %s", nvml_err)
+
+    # 2. Check via PyTorch CUDA (if installed)
+    try:
+        import torch
+        if torch.cuda.is_available() and torch.cuda.device_count() > 0:
+            name = torch.cuda.get_device_name(0)
+            return True, f"PyTorch CUDA detected: {name} ({torch.cuda.device_count()} device(s))"
+    except Exception:
+        pass
+
+    # 3. Check via nvidia-smi CLI
+    try:
+        smi = shutil.which("nvidia-smi")
+        if smi:
+            res = subprocess.run([smi, "-L"], capture_output=True, text=True, timeout=3)
+            if res.returncode == 0 and "GPU " in res.stdout:
+                line = res.stdout.strip().splitlines()[0]
+                return True, f"nvidia-smi detected: {line}"
+    except Exception:
+        pass
+
+    return False, "No physical NVIDIA GPU adapter detected on host"
 
 
 def _nvidia_cdi_specs() -> List[str]:
@@ -63,7 +107,28 @@ class DockerSandboxManager:
         self.gpu_degraded_reason: str = ""
         self.is_pulling: bool = False
         self.is_creating: bool = False
+        self._init_lock = threading.Lock()
+        self._last_init_attempt: float = 0.0
         self._init_docker()
+
+    def _ensure_docker(self, force: bool = False) -> bool:
+        """Attempt to connect or reconnect to the Docker daemon if not currently available.
+        Uses a lock and cooldown to prevent spamming failed connections during high-frequency polls."""
+        if not HAS_DOCKER:
+            return False
+        if self.docker_available and self.client:
+            return True
+
+        now = time.time()
+        if not force and (now - self._last_init_attempt < 3.0):
+            return False
+
+        with self._init_lock:
+            if self.docker_available and self.client:
+                return True
+            self._last_init_attempt = time.time()
+            self._init_docker()
+            return self.docker_available
 
     def _init_docker(self):
         if not HAS_DOCKER:
@@ -78,34 +143,45 @@ class DockerSandboxManager:
         except Exception as e:
             logger.warning(f"Could not connect to Docker daemon: {e}. Container features will be in local fallback mode.")
             self.docker_available = False
+            self.client = None
+            self.gpu_passthrough_available = False
 
     def _check_gpu_capability(self):
-        """Detect NVIDIA GPU support: the classic `nvidia` runtime OR CDI
-        devices (Docker Desktop / newer toolkits expose GPUs via CDI without
-        registering an 'nvidia' runtime)."""
+        """Detect NVIDIA GPU support: requires BOTH Docker runtime support
+        (classic 'nvidia' runtime OR CDI devices) AND an actual physical
+        NVIDIA GPU adapter detected on the host."""
         if not self.docker_available or not self.client:
             return
 
         try:
             info = self.client.info()
             runtimes = info.get("Runtimes", {}) or {}
-            if "nvidia" in runtimes:
-                self.gpu_passthrough_available = True
-                logger.info("NVIDIA Container Toolkit detected in Docker runtimes.")
-                return
-
+            has_nvidia_runtime = "nvidia" in runtimes
             cdi_specs = _nvidia_cdi_specs()
-            if cdi_specs:
-                self.gpu_passthrough_available = True
-                logger.info("NVIDIA CDI device specs detected (%s).", ", ".join(cdi_specs[:3]))
+            has_cdi = bool(cdi_specs)
+
+            if not has_nvidia_runtime and not has_cdi:
+                self.gpu_passthrough_available = False
+                self.gpu_degraded_reason = (
+                    "No 'nvidia' runtime and no NVIDIA CDI device specs found in Docker. "
+                    "Install the NVIDIA Container Toolkit to enable GPU passthrough."
+                )
+                logger.warning(self.gpu_degraded_reason)
                 return
 
-            self.gpu_passthrough_available = False
-            self.gpu_degraded_reason = (
-                "No 'nvidia' runtime and no NVIDIA CDI device specs found in Docker. "
-                "Install the NVIDIA Container Toolkit to enable GPU passthrough."
-            )
-            logger.warning(self.gpu_degraded_reason)
+            has_gpu, gpu_detail = _has_physical_nvidia_gpu()
+            if not has_gpu:
+                self.gpu_passthrough_available = False
+                self.gpu_degraded_reason = (
+                    f"Docker NVIDIA runtime present, but no physical NVIDIA GPU adapter found ({gpu_detail}). "
+                    "Container will start in CPU mode."
+                )
+                logger.info(self.gpu_degraded_reason)
+                return
+
+            self.gpu_passthrough_available = True
+            self.gpu_degraded_reason = ""
+            logger.info("NVIDIA GPU passthrough available (%s).", gpu_detail)
         except Exception as e:
             self.gpu_passthrough_available = False
             self.gpu_degraded_reason = f"NVIDIA container runtime check failed: {e}"
@@ -131,6 +207,9 @@ class DockerSandboxManager:
         8001, and /workspace mount. Recreates the container when the desired
         configuration changed (old container removed; workspace data is on a
         host volume and survives)."""
+        if not self.docker_available:
+            self._ensure_docker(force=True)
+
         if not self.docker_available or not self.client:
             return None
 
@@ -233,27 +312,37 @@ class DockerSandboxManager:
             labels=labels,
         )
         if self.gpu_passthrough_available:
-            try:
-                return self.client.containers.run(
-                    device_requests=[
-                        DeviceRequest(count=-1, capabilities=[["gpu", "compute", "utility"]])
-                    ],
-                    **common,
-                )
-            except Exception as e:
+            # Re-verify physical GPU adapter exists before dispatching DeviceRequest
+            has_gpu, _ = _has_physical_nvidia_gpu()
+            if not has_gpu:
                 self.gpu_passthrough_available = False
                 self.gpu_degraded_reason = (
-                    f"Docker refused GPU device request ({e}). Container started WITHOUT GPU. "
-                    "Check the NVIDIA Container Toolkit installation."
+                    "No physical NVIDIA GPU adapter found on host. "
+                    "Skipping GPU DeviceRequest to avoid nvidia-container-cli errors."
                 )
-                logger.error(self.gpu_degraded_reason)
-                # Remove the half-created container if the daemon left one.
+                logger.warning(self.gpu_degraded_reason)
+            else:
                 try:
-                    stale = self.client.containers.get(settings.CONTAINER_NAME)
-                    stale.remove(force=True)
-                except Exception:
-                    pass
-        else:
+                    return self.client.containers.run(
+                        device_requests=[
+                            DeviceRequest(count=-1, capabilities=[["gpu", "compute", "utility"]])
+                        ],
+                        **common,
+                    )
+                except Exception as e:
+                    self.gpu_passthrough_available = False
+                    self.gpu_degraded_reason = (
+                        f"Docker refused GPU device request ({e}). Container started WITHOUT GPU. "
+                        "Check the NVIDIA Container Toolkit installation."
+                    )
+                    logger.error(self.gpu_degraded_reason)
+                    # Remove the half-created container if the daemon left one.
+                    try:
+                        stale = self.client.containers.get(settings.CONTAINER_NAME)
+                        stale.remove(force=True)
+                    except Exception:
+                        pass
+        if not self.gpu_passthrough_available:
             logger.warning(
                 "Starting container WITHOUT GPU passthrough: %s", self.gpu_degraded_reason or "capability unknown"
             )
@@ -261,6 +350,9 @@ class DockerSandboxManager:
 
     def get_status(self) -> Dict[str, Any]:
         """Returns the current container and Docker daemon status."""
+        if not self.docker_available:
+            self._ensure_docker()
+
         hf_cache_location = "/root/.cache/huggingface (ephemeral)" if settings.EPHEMERAL_MODE else "/workspace/.hf_cache"
         status = {
             "docker_available": self.docker_available,
@@ -276,6 +368,15 @@ class DockerSandboxManager:
         }
 
         if not self.docker_available or not self.client:
+            return status
+
+        try:
+            self.client.ping()
+        except Exception as e:
+            logger.info("Docker daemon became unreachable: %s", e)
+            self.docker_available = False
+            self.client = None
+            status["docker_available"] = False
             return status
 
         if getattr(self, "is_pulling", False):
@@ -303,6 +404,9 @@ class DockerSandboxManager:
         Desktop restart, GPU containers frequently come back without GPU
         injection - a full recreate re-runs the nvidia runtime hooks.
         The workspace is a host volume, so no data is lost."""
+        if not self.docker_available:
+            self._ensure_docker(force=True)
+
         if not self.docker_available or not self.client:
             return False
 

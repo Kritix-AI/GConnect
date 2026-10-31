@@ -1,6 +1,21 @@
 # GConnect Changelog
 
-## 2.2.2 (2026-10-31) - Real-time Connected Devices Tracker, Command Contrast, Status Bar & Editor Caret
+## 2.2.2 (2026-10-31) - Self-Healing Docker, Connected Devices, CORS Fix & IDE Enhancements
+
+### Self-Healing Docker Dynamic Reconnect
+- Added automatic detection of Docker daemon when launched *after* GConnect boots via `_ensure_docker()`.
+- Added dynamic reconnect hooks in `get_status()`, `get_or_create_container()`, and `restart_container()`.
+- Thread-safe reconnection attempts guarded with lock and cooldown timer to avoid connection flooding.
+- Handles Docker daemon shutdown/restart gracefully: detects failed pings and transitions container status to offline without crashing.
+
+### Physical NVIDIA GPU Validation before DeviceRequest
+- Added `_has_physical_nvidia_gpu()` checking `pynvml`, `torch.cuda`, and `nvidia-smi` CLI before requesting GPU passthrough from Docker.
+- Prevents `nvidia-container-cli: no adapters were found` (500 daemon error) on systems with NVIDIA toolkits/CDI specs installed but no physical NVIDIA card.
+- Gracefully falls back to CPU container execution.
+
+### Desktop WebView2 CORS Preflight Header Fix
+- Added `X-Client-Id` to `CORS_ALLOW_HEADERS` and `_tauri_cors_headers` in `backend/auth.py`.
+- Eliminates WebView2 preflight `OPTIONS` rejections for `/api/files` and `/api/container/status` inside the desktop app.
 
 ### Real-Time Connected Devices Tracker for GPU Sharing
 - Added thread-safe `ConnectionTracker` in `backend/connection_tracker.py` that accurately monitors all clients and devices connected to a GPU host.

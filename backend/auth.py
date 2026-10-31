@@ -43,7 +43,7 @@ PUBLIC_PATHS = {"/", "/favicon.ico", "/index.html"}
 # remote daemon, so without these headers WebView2 blocks every cross-origin
 # fetch (Authorization header -> preflight) before the app sees a response.
 # Every other cross-origin caller stays rejected below.
-CORS_ALLOW_HEADERS = "Authorization, Content-Type"
+CORS_ALLOW_HEADERS = "Authorization, Content-Type, X-Client-Id"
 CORS_ALLOW_METHODS = "GET, POST, DELETE, OPTIONS"
 
 _token: Optional[str] = None
@@ -125,7 +125,7 @@ def _origin_allowed(request: Request) -> bool:
 def _tauri_cors_headers(origin: str) -> Dict[str, str]:
     return {
         "Access-Control-Allow-Origin": origin,
-        "Access-Control-Allow-Headers": CORS_ALLOW_HEADERS,
+        "Access-Control-Allow-Headers": "Authorization, Content-Type, X-Client-Id, *",
         "Access-Control-Allow-Methods": CORS_ALLOW_METHODS,
     }
 

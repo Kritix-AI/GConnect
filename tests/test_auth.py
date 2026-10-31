@@ -78,10 +78,11 @@ def test_tauri_origin_gets_cors_headers(client, auth_settings):
     assert res.status_code == 200
     assert res.headers["Access-Control-Allow-Origin"] == "http://tauri.localhost"
     assert "Authorization" in res.headers.get("Access-Control-Allow-Headers", "")
+    assert "X-Client-Id" in res.headers.get("Access-Control-Allow-Headers", "")
 
 
 def test_tauri_origin_preflight_204(client, auth_settings):
-    """Preflight (Authorization header forces one) must be answerable without
+    """Preflight (Authorization and X-Client-Id headers force one) must be answerable without
     a token - browsers send OPTIONS before the authenticated request."""
     res = client.options(
         "/api/files",
@@ -89,11 +90,12 @@ def test_tauri_origin_preflight_204(client, auth_settings):
             "Origin": "tauri://localhost",
             "Host": "testserver",
             "Access-Control-Request-Method": "GET",
-            "Access-Control-Request-Headers": "authorization",
+            "Access-Control-Request-Headers": "authorization, content-type, x-client-id",
         },
     )
     assert res.status_code == 204
     assert res.headers["Access-Control-Allow-Origin"] == "tauri://localhost"
+    assert "X-Client-Id" in res.headers.get("Access-Control-Allow-Headers", "")
 
 
 def test_tauri_origin_still_needs_token(client, auth_settings):
