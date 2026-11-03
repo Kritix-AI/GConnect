@@ -1753,3 +1753,214 @@ html, body {
 .device-channels {
   color: var(--accent-yellow);
 }
+
+/* Audio Streaming & Device Management UI (Requirement R1) */
+
+.audio-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-left: 4px;
+  display: inline-block;
+  flex-shrink: 0;
+  transition: background-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.audio-status-dot.offline {
+  background-color: var(--text-muted);
+}
+
+.audio-status-dot.connected {
+  background-color: var(--accent-blue);
+}
+
+.audio-status-dot.broadcasting {
+  background-color: var(--accent-green);
+  box-shadow: 0 0 6px rgba(46, 160, 67, 0.8);
+  animation: live-pulse 2s ease-in-out infinite;
+}
+
+.audio-status-dot.muted {
+  background-color: var(--accent-amber);
+}
+
+.audio-stream-modal-card {
+  width: 490px;
+  max-width: 95vw;
+}
+
+.audio-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  margin-bottom: 14px;
+  line-height: 1.4;
+}
+
+.audio-banner.warning {
+  background-color: rgba(210, 153, 34, 0.15);
+  border: 1px solid rgba(210, 153, 34, 0.4);
+  color: var(--accent-amber);
+}
+
+.audio-banner code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  background-color: rgba(0, 0, 0, 0.2);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+.audio-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.audio-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.audio-section-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-bright);
+}
+
+.audio-control-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.audio-select {
+  margin-bottom: 0 !important;
+  flex: 1;
+  background-color: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-bright);
+  font-size: 13px;
+  padding: 6px 10px;
+  outline: none;
+  cursor: pointer;
+}
+
+.audio-select:focus {
+  border-color: var(--accent-blue);
+}
+
+.audio-vu-container {
+  height: 6px;
+  background-color: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  overflow: hidden;
+  padding: 1px;
+}
+
+.audio-vu-track {
+  width: 100%;
+  height: 100%;
+  position: relative;
+}
+
+.audio-vu-fill {
+  width: 0%;
+  height: 100%;
+  background: linear-gradient(90deg, #2ea043 0%, #d29922 75%, #f85149 100%);
+  border-radius: 2px;
+  transition: width 0.05s ease-out;
+}
+
+.audio-cluster-box {
+  background-color: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 12px;
+}
+
+.audio-cluster-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.audio-cluster-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.audio-cluster-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-bright);
+}
+
+.audio-cluster-desc {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.audio-cluster-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.audio-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+}
+
+.audio-badge.connected {
+  background-color: rgba(46, 160, 67, 0.15);
+  color: var(--accent-green);
+  border-color: rgba(46, 160, 67, 0.4);
+}
+
+.audio-badge.disconnected {
+  background-color: rgba(248, 81, 73, 0.15);
+  color: var(--accent-red);
+  border-color: rgba(248, 81, 73, 0.4);
+}
+
+.audio-badge.ducking {
+  background-color: rgba(210, 153, 34, 0.15);
+  color: var(--accent-amber);
+  border-color: rgba(210, 153, 34, 0.4);
+}
+
+.btn-claimed {
+  background-color: var(--accent-green) !important;
+  border-color: var(--accent-green-hover) !important;
+  color: #fff !important;
+  cursor: default;
+}
+
+.btn-muted {
+  background-color: rgba(248, 81, 73, 0.15) !important;
+  border-color: rgba(248, 81, 73, 0.4) !important;
+  color: var(--accent-red) !important;
+}
+

@@ -1,6 +1,26 @@
 # GConnect Changelog
 
-## 2.2.2 (2026-10-31) - Self-Healing Docker, Connected Devices, CORS Fix & IDE Enhancements
+## 2.2.2 (2026-10-31) - Bidirectional Audio Streaming, Self-Healing Docker, Connected Devices & IDE Enhancements
+
+### Client-to-Container Bidirectional Audio & Microphone Streaming
+- **Frontend Audio Streaming & AudioWorklet (`frontend/js/audio-processor.js`, `frontend/js/audio.js`)**:
+  - Fractional linear downsampler converting client microphone input to 16,000 Hz 16-bit mono PCM.
+  - Device enumeration (`navigator.mediaDevices.enumerateDevices`) with hardware AEC and noise suppression.
+  - Low-latency binary PCM streaming over authenticated WebSocket `/ws/audio`.
+  - Container audio playback via `AudioContext` targeting user-selected `sinkId` with a 200ms overrun ceiling clamp.
+  - Live VU meter showing input speech activity.
+- **Google Meet-Style Audio Settings Modal (`frontend/index.html`, `frontend/css/styles.css`)**:
+  - `[🎙️ Audio]` top toolbar button and modal (`#audioStreamModalOverlay`) with input/output device selectors.
+  - Hardware mute/unmute controls and one-click active microphone cluster takeover.
+- **Backend Audio Hub & Router (`backend/audio_router.py`, `backend/main.py`)**:
+  - 50ms pre-buffering circular jitter buffer (`AudioRingBuffer`) smoothing network packet delivery.
+  - Software audio ducking gate (`DuckingGate`) applying -18dB attenuation during container playback to eliminate feedback loops.
+  - Cluster speaker arbitration (`SpeakerArbitrator`) ensuring exclusive active microphone streaming with instant takeover.
+  - Dedicated `/ws/audio` WebSocket hub with token authentication and cross-origin protection.
+- **Docker Audio Virtualization (`backend/docker_manager.py`)**:
+  - Virtual ALSA loopback `/etc/asound.conf` mapping default capture and playback to container overlayfs FIFOs (`/tmp/.gconnect_audio/`).
+  - Transparent support for standard Python libraries (`speech_recognition`, `sounddevice`, `pyaudio`) inside `connect_dev_sandbox` without code changes.
+  - Standalone `voice_test.py` verification utility in workspace root.
 
 ### GPU Share Toggle Resilience & Token Persistence
 - **Fixed 'Applying Configuration...' Freeze**: `frontend/js/share.js` now awaits `window.__TAURI__.core.invoke("backend_info")` to ensure the sidecar has restarted and passed its health check before refreshing dashboard state, updating credentials cleanly.

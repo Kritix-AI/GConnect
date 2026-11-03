@@ -82,6 +82,9 @@ class AppManager {
     if (window.clusterManager) {
       window.clusterManager.init();
     }
+    if (window.audioManager) {
+      window.audioManager.init();
+    }
 
     window.editorManager.init(() => {
       this.ensureSampleScript();

@@ -91,6 +91,12 @@
         <span id="clusterBtnLabel">Cluster</span>
       </button>
 
+      <button class="btn btn-secondary btn-sm" id="btnAudio" title="Audio & Microphone Streaming">
+        <i data-lucide="mic" id="audioBtnIcon"></i>
+        <span id="audioBtnLabel">Audio</span>
+        <span class="audio-status-dot offline" id="audioStatusDot" title="Audio stream status"></span>
+      </button>
+
       <button class="btn btn-secondary btn-sm" id="btnRestartSandbox" title="Restart Docker Sandbox">
         <i data-lucide="refresh-cw"></i>
         <span>Restart Sandbox</span>
@@ -286,6 +292,104 @@
           <span>Download Audio</span>
         </a>
         <button class="btn btn-primary" id="btnOkAudioModal">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal for Live Audio & Microphone Streaming (R1) -->
+  <div class="modal-overlay hidden" id="audioStreamModalOverlay">
+    <div class="modal-card audio-stream-modal-card">
+      <div class="modal-header-row">
+        <h3 class="modal-title">
+          <i data-lucide="mic" class="icon-sm" style="color: var(--accent-blue);"></i>
+          <span>Audio & Microphone Settings</span>
+        </h3>
+        <button class="icon-btn" id="btnCloseAudioStreamModal" title="Close">
+          <i data-lucide="x" class="icon-sm"></i>
+        </button>
+      </div>
+      <p class="modal-subtitle">
+        Ultra-low-latency bidirectional streaming between client mic/speakers and the container sandbox.
+      </p>
+
+      <!-- Insecure context warning banner (if accessed via plain HTTP remote IP) -->
+      <div class="audio-banner warning hidden" id="insecureAudioBanner">
+        <i data-lucide="alert-triangle" class="icon-xs"></i>
+        <span>
+          Microphone access requires a secure context (HTTPS, localhost, or Desktop App). When connecting via IP, enable <code>chrome://flags/#unsafely-treat-insecure-origin-as-secure</code>.
+        </span>
+      </div>
+
+      <!-- Microphone Section -->
+      <div class="audio-section">
+        <div class="audio-section-header">
+          <label class="audio-section-label" for="audioInputSelect">
+            <i data-lucide="mic" class="icon-xs"></i>
+            <span>Microphone (Input Device)</span>
+          </label>
+          <span class="audio-badge" id="audioConnectionBadge">Connecting...</span>
+        </div>
+        <div class="audio-control-row">
+          <select id="audioInputSelect" class="modal-input audio-select" title="Select Microphone">
+            <option value="default">Default Microphone</option>
+          </select>
+          <button class="btn btn-secondary btn-sm" id="btnMicMute" title="Toggle Microphone Mute">
+            <i data-lucide="mic" class="icon-xs" id="micMuteIcon"></i>
+            <span id="micMuteLabel">Mute</span>
+          </button>
+        </div>
+        <div class="audio-vu-container" id="micVuMeter" title="Microphone Input Level">
+          <div class="audio-vu-track">
+            <div class="audio-vu-fill" id="micVuFill"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Speaker Section -->
+      <div class="audio-section">
+        <div class="audio-section-header">
+          <label class="audio-section-label" for="audioOutputSelect">
+            <i data-lucide="volume-2" class="icon-xs"></i>
+            <span>Speakers (Output Device)</span>
+          </label>
+        </div>
+        <div class="audio-control-row">
+          <select id="audioOutputSelect" class="modal-input audio-select" title="Select Speaker/Headphones">
+            <option value="default">Default System Speakers</option>
+          </select>
+          <button class="btn btn-secondary btn-sm" id="btnTestAudioOutput" title="Play Chime Test">
+            <i data-lucide="play" class="icon-xs"></i>
+            <span>Test</span>
+          </button>
+          <button class="btn btn-secondary btn-sm" id="btnSpeakerMute" title="Toggle Speaker Mute">
+            <i data-lucide="volume-2" class="icon-xs" id="speakerMuteIcon"></i>
+            <span id="speakerMuteLabel">Mute</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Cluster Microphone Takeover Section -->
+      <div class="audio-section audio-cluster-box">
+        <div class="audio-cluster-row">
+          <div class="audio-cluster-info">
+            <div class="audio-cluster-title">
+              <i data-lucide="radio" class="icon-xs" style="color: var(--accent-blue);"></i>
+              <span id="clusterActiveSpeakerLabel">Active: None</span>
+            </div>
+            <div class="audio-cluster-desc">Exclusive microphone arbitration across cluster clients.</div>
+          </div>
+          <div class="audio-cluster-actions">
+            <span class="audio-badge ducking hidden" id="audioDuckingBadge">Ducking (-18dB)</span>
+            <button class="btn btn-primary btn-sm" id="btnClaimSpeaker" title="Claim Microphone for this device">
+              <i data-lucide="radio" class="icon-xs"></i>
+              <span>Claim Microphone</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-actions">
+        <button class="btn btn-primary" id="btnDoneAudioStreamModal">Done</button>
       </div>
     </div>
   </div>
@@ -572,6 +676,7 @@
   <script src="js/problems.js"></script>
   <script src="js/terminal.js"></script>
   <script src="js/filetree.js"></script>
+  <script src="js/audio.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>

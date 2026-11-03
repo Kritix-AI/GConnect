@@ -53,6 +53,13 @@ class Settings(BaseSettings):
     # File API limits
     MAX_CONTENT_READ_BYTES: int = 5 * 1024 * 1024  # 5 MB for /api/files/content
 
+    # Audio streaming configuration (Milestone 1 & 2)
+    AUDIO_SAMPLE_RATE: int = 16000
+    AUDIO_BUFFER_MS: int = 50
+    AUDIO_DUCKING_DB: float = -18.0
+    AUDIO_BRIDGE_PORT: int = 8002
+    AUDIO_PORT: int = 8002
+
     @property
     def effective_host(self) -> str:
         """Resolved bind host: loopback unless LAN exposure is explicitly enabled."""

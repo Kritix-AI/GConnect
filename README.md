@@ -10,10 +10,10 @@
 [![CI](https://github.com/Kritix-AI/GConnect/actions/workflows/ci.yml/badge.svg?branch=v2)](https://github.com/Kritix-AI/GConnect/actions/workflows/ci.yml)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-58a6ff?style=flat-square)](#-installation--uninstallation)
 [![License: MIT](https://img.shields.io/badge/license-MIT-8b949e?style=flat-square)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-68%20backend%20%2B%2015%20E2E-2ea043?style=flat-square)](#-testing)
+[![Tests](https://img.shields.io/badge/tests-139%20backend%20%2B%2015%20E2E-2ea043?style=flat-square)](#-testing)
 [![Security](https://img.shields.io/badge/security%20audit-26%20issues%20fixed-f85149?style=flat-square)](docs/SECURITY_AUDIT.md)
 
-**Desktop App** · **Docker GPU Sandbox** · **Monaco IDE** · **Live Terminal** · **Real-time Telemetry** · **Multi-PC GPU Cluster**
+**Desktop App** · **Docker GPU Sandbox** · **Monaco IDE** · **Live Terminal** · **Bidirectional Audio & Mic** · **Real-time Telemetry** · **Multi-PC GPU Cluster**
 
 </div>
 
@@ -479,6 +479,7 @@ Base URL: `http://127.0.0.1:<port>` — all routes except `/api/health` and `/ap
 | `GET` | `/api/telemetry/snapshot` | Current GPU stats (all GPUs) |
 | `WS` | `/ws/telemetry` | Live telemetry stream (2 Hz) |
 | `WS` | `/ws/terminal` | Interactive container PTY (text = input, binary = control) |
+| `WS` | `/ws/audio` | Bidirectional audio streaming (client mic & container playback) |
 | `GET` | `/api/files` | Workspace tree |
 | `GET` | `/api/files/content?path=` | Read file (size-capped, returns `mtime`) |
 | `POST` | `/api/files/save` | Atomic save (optional `expected_mtime` → 409 on conflict) |
@@ -559,7 +560,7 @@ GConnect/
 │   ├── backend_entry.py     #   sidecar entrypoint
 │   └── gconnect_backend.spec#   spec (SPECPATH-relative, CWD-independent)
 ├── scripts/                 # setup_host (win/linux), build_sidecar
-├── tests/                   # 68 backend tests (conftest isolates everything)
+├── tests/                   # 139 backend tests (conftest isolates everything)
 ├── e2e/                     # 15 Playwright tests + webServer config
 ├── playwright.config.js     # boots a disposable daemon on :8900 per run
 ├── workspace/               # your files (mounted into the container)

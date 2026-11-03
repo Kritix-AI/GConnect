@@ -27,6 +27,253 @@ except ImportError:
 # so settings actually apply instead of being silently ignored.
 CONFIG_LABEL = "dev.gconnect.config"
 
+ASOUND_CONF_CONTENT = """# /etc/asound.conf - Virtual Audio Configuration for GConnect Container Sandbox
+# Maps default ALSA capture to virtual microphone FIFO and default playback to virtual speaker FIFO.
+
+pcm.gconnect_mic_raw {
+    type file
+    file "/dev/null"
+    infile "/tmp/.gconnect_audio/mic.fifo"
+    format "raw"
+    slave.pcm null
+}
+
+pcm.gconnect_mic {
+    type plug
+    slave {
+        pcm "gconnect_mic_raw"
+        rate 16000
+        format S16_LE
+        channels 1
+    }
+    hint {
+        show on
+        description "Virtual GConnect Microphone"
+    }
+}
+
+pcm.gconnect_spk_raw {
+    type file
+    file "/tmp/.gconnect_audio/spk.fifo"
+    format "raw"
+    slave.pcm null
+}
+
+pcm.gconnect_spk {
+    type plug
+    slave {
+        pcm "gconnect_spk_raw"
+        rate 16000
+        format S16_LE
+        channels 1
+    }
+    hint {
+        show on
+        description "Virtual GConnect Speaker"
+    }
+}
+
+pcm.!default {
+    type asym
+    playback.pcm "gconnect_spk"
+    capture.pcm "gconnect_mic"
+    hint {
+        show on
+        description "Default Virtual GConnect Audio Device"
+    }
+}
+
+ctl.!default {
+    type null
+}
+"""
+
+CONTAINER_AUDIO_BRIDGE_CODE = '''#!/usr/bin/env python3
+"""
+gconnect_audio_bridge.py - Lightweight Audio Bridge inside Docker Container.
+Runs as a background daemon inside `connect_dev_sandbox`.
+Bridges between ALSA virtual FIFOs (/tmp/.gconnect_audio) and the Host Audio Hub (TCP 8002).
+Zero external dependencies (uses standard library only: os, socket, select, threading).
+"""
+
+import errno
+import logging
+import os
+import select
+import socket
+import sys
+import threading
+import time
+
+AUDIO_DIR = "/tmp/.gconnect_audio"
+MIC_FIFO = os.path.join(AUDIO_DIR, "mic.fifo")
+SPK_FIFO = os.path.join(AUDIO_DIR, "spk.fifo")
+BIND_PORT = int(os.environ.get("GCONNECT_AUDIO_PORT", "8002"))
+CHUNK_SIZE = 1024  # 512 samples * 2 bytes (16kHz 16-bit mono PCM = 32ms)
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [gconnect-audio-bridge] %(levelname)s: %(message)s"
+)
+logger = logging.getLogger("audio_bridge")
+
+
+def init_fifos():
+    """Ensure FIFOs exist and are opened with O_RDWR to prevent open deadlocks."""
+    os.makedirs(AUDIO_DIR, exist_ok=True)
+    for path in (MIC_FIFO, SPK_FIFO):
+        if not os.path.exists(path):
+            try:
+                os.mkfifo(path, 0o666)
+                logger.info(f"Created FIFO: {path}")
+            except OSError as e:
+                if e.errno != errno.EEXIST:
+                    raise
+
+    # Open with O_RDWR: under Linux, O_RDWR prevents open() and read()/write() from
+    # blocking on peer availability. This guarantees PortAudio and ALSA GropeDevice
+    # never hang during device initialization.
+    mic_fd = os.open(MIC_FIFO, os.O_RDWR | os.O_NONBLOCK)
+    spk_fd = os.open(SPK_FIFO, os.O_RDWR | os.O_NONBLOCK)
+    return mic_fd, spk_fd
+
+
+def handle_client(client_sock: socket.socket, mic_fd: int, spk_fd: int):
+    """Handles bidirectional audio streaming with the Host Audio Hub."""
+    client_sock.setblocking(False)
+    logger.info("Host Audio Hub connected.")
+    running = True
+
+    def spk_to_host():
+        """Reads container audio playback from spk.fifo and sends to host."""
+        nonlocal running
+        use_poll = hasattr(select, "poll")
+        if use_poll:
+            poll = select.poll()
+            poll.register(spk_fd, select.POLLIN)
+
+        while running:
+            try:
+                can_read = False
+                if use_poll:
+                    events = poll.poll(50)  # 50ms timeout
+                    for fd, event in events:
+                        if event & select.POLLIN:
+                            can_read = True
+                else:
+                    r, _, _ = select.select([spk_fd], [], [], 0.05)
+                    can_read = bool(r)
+
+                if can_read:
+                    try:
+                        data = os.read(spk_fd, CHUNK_SIZE)
+                        if data:
+                            # Send non-blocking with writability check and EAGAIN handling
+                            total_sent = 0
+                            while total_sent < len(data) and running:
+                                try:
+                                    sent = client_sock.send(data[total_sent:])
+                                    if sent == 0:
+                                        raise ConnectionResetError("Host socket closed during send")
+                                    total_sent += sent
+                                except (BlockingIOError, OSError) as send_err:
+                                    if getattr(send_err, "errno", None) in (errno.EAGAIN, errno.EWOULDBLOCK) or isinstance(send_err, BlockingIOError):
+                                        # Wait briefly for writability before retrying
+                                        _, w, _ = select.select([], [client_sock], [], 0.05)
+                                        if not w:
+                                            # Send buffer full; drop remaining bytes to prevent head-of-line blocking
+                                            break
+                                    else:
+                                        raise
+                    except (BlockingIOError, OSError) as read_err:
+                        if read_err.errno not in (errno.EAGAIN, errno.EWOULDBLOCK):
+                            raise
+            except (socket.error, BrokenPipeError, ConnectionResetError) as e:
+                if getattr(e, "errno", None) in (errno.EAGAIN, errno.EWOULDBLOCK) or isinstance(e, BlockingIOError):
+                    continue
+                logger.debug(f"Host socket send closed: {e}")
+                running = False
+                break
+            except Exception as e:
+                logger.error(f"Error in spk_to_host: {e}")
+                time.sleep(0.01)
+
+    spk_thread = threading.Thread(target=spk_to_host, daemon=True)
+    spk_thread.start()
+
+    # Main thread handles Host mic -> Container mic.fifo
+    while running:
+        try:
+            r, _, _ = select.select([client_sock], [], [], 0.05)
+            if r:
+                data = client_sock.recv(CHUNK_SIZE * 4)
+                if not data:
+                    logger.info("Host disconnected.")
+                    break
+                # Write to mic.fifo non-blocking. If pipe buffer is full (~64KB),
+                # drain the entire unread FIFO backlog so latency is strictly clamped to sub-50ms real-time.
+                try:
+                    os.write(mic_fd, data)
+                except (BlockingIOError, OSError) as write_err:
+                    if write_err.errno in (errno.EAGAIN, errno.EWOULDBLOCK):
+                        # Drain entire FIFO backlog in non-blocking loop until empty or EAGAIN
+                        while True:
+                            try:
+                                drained = os.read(mic_fd, 65536)
+                                if not drained:
+                                    break
+                            except (BlockingIOError, OSError) as drain_err:
+                                if drain_err.errno in (errno.EAGAIN, errno.EWOULDBLOCK):
+                                    break
+                                raise
+                            except Exception:
+                                break
+                        # Write the fresh incoming chunk (or clamp to last 1600 bytes = 50ms)
+                        try:
+                            fresh_chunk = data[-1600:] if len(data) > 1600 else data
+                            os.write(mic_fd, fresh_chunk)
+                        except Exception:
+                            pass
+                    else:
+                        raise
+        except (socket.error, BrokenPipeError, ConnectionResetError):
+            break
+        except Exception as e:
+            logger.error(f"Error in host_to_mic: {e}")
+            break
+
+    running = False
+    try:
+        client_sock.close()
+    except Exception:
+        pass
+    logger.info("Host Audio Hub session ended.")
+
+
+def run_bridge_server():
+    mic_fd, spk_fd = init_fifos()
+    server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    server_sock.bind(("0.0.0.0", BIND_PORT))
+    server_sock.listen(1)
+    logger.info(f"GConnect Audio Bridge listening on 0.0.0.0:{BIND_PORT}...")
+
+    while True:
+        try:
+            client_sock, addr = server_sock.accept()
+            logger.info(f"Accepted connection from {addr}")
+            handle_client(client_sock, mic_fd, spk_fd)
+        except KeyboardInterrupt:
+            break
+        except Exception as e:
+            logger.error(f"Accept error: {e}")
+            time.sleep(1.0)
+
+
+if __name__ == "__main__":
+    run_bridge_server()
+'''
+
 
 def _has_physical_nvidia_gpu() -> Tuple[bool, str]:
     """Checks whether a physical NVIDIA GPU adapter is actually present on the host
@@ -196,6 +443,7 @@ class DockerSandboxManager:
             "image": settings.CONTAINER_IMAGE,
             "shm": settings.SHM_SIZE,
             "inference_port": settings.INFERENCE_PORT,
+            "audio_bridge_port": getattr(settings, "AUDIO_BRIDGE_PORT", 8002),
             "hf_home": "/root/.cache/huggingface" if settings.EPHEMERAL_MODE else "/workspace/.hf_cache",
             "workspace": workspace_path,
         }
@@ -204,8 +452,8 @@ class DockerSandboxManager:
 
     def get_or_create_container(self):
         """Ensures the sandbox container is running with GPU, 8GB shm, port
-        8001, and /workspace mount. Recreates the container when the desired
-        configuration changed (old container removed; workspace data is on a
+        8001, port 8002 (audio), and /workspace mount. Recreates the container when
+        the desired configuration changed (old container removed; workspace data is on a
         host volume and survives)."""
         if not self.docker_available:
             self._ensure_docker(force=True)
@@ -227,6 +475,7 @@ class DockerSandboxManager:
                     logger.info(f"Starting stopped container {settings.CONTAINER_NAME}...")
                     container.start()
                     container.reload()
+                    self.provision_container_audio(container)
                     return container
 
                 labels = container.attrs.get("Config", {}).get("Labels", {}) or {}
@@ -245,6 +494,7 @@ class DockerSandboxManager:
                         return container
                     # fall through to creation
                 else:
+                    self.provision_container_audio(container)
                     return container
             except Exception:
                 pass
@@ -275,7 +525,8 @@ class DockerSandboxManager:
             }
 
             ports = {
-                "8001/tcp": settings.INFERENCE_PORT
+                "8001/tcp": settings.INFERENCE_PORT,
+                "8002/tcp": getattr(settings, "AUDIO_BRIDGE_PORT", 8002),
             }
 
             container = self._run_container_with_gpu_fallback(
@@ -283,6 +534,7 @@ class DockerSandboxManager:
             )
 
             logger.info(f"Container '{settings.CONTAINER_NAME}' started (ID: {container.short_id}).")
+            self.provision_container_audio(container)
             return container
 
         except Exception as e:
@@ -347,6 +599,68 @@ class DockerSandboxManager:
                 "Starting container WITHOUT GPU passthrough: %s", self.gpu_degraded_reason or "capability unknown"
             )
         return self.client.containers.run(**common)
+
+    def provision_container_audio(self, container: Any = None) -> bool:
+        """Provisions virtual ALSA audio devices and starts the audio bridge daemon in the container."""
+        try:
+            if container is None:
+                container = self.get_or_create_container()
+            if not container:
+                return False
+
+            if not hasattr(container, "exec_run"):
+                return False
+
+            # 1. Check if libasound.so.2 is available; install libasound2 alsa-utils if missing
+            chk_res = container.exec_run(
+                ["python3", "-c", "import ctypes; ctypes.cdll.LoadLibrary('libasound.so.2')"]
+            )
+            exit_code = getattr(chk_res, "exit_code", 0)
+            if isinstance(exit_code, int) and exit_code != 0:
+                logger.info("Installing libasound2 and alsa-utils in container...")
+                container.exec_run(
+                    ["bash", "-c", "apt-get update && apt-get install -y --no-install-recommends libasound2 alsa-utils"]
+                )
+
+            # 2. Deploy /etc/asound.conf
+            deploy_asound_cmd = f"cat << 'EOF' > /etc/asound.conf\n{ASOUND_CONF_CONTENT}\nEOF\n"
+            container.exec_run(["bash", "-c", deploy_asound_cmd])
+
+            # 3. Create audio directory and FIFOs
+            create_fifos_cmd = (
+                "mkdir -p /tmp/.gconnect_audio && "
+                "(test -p /tmp/.gconnect_audio/mic.fifo || mkfifo -m 666 /tmp/.gconnect_audio/mic.fifo) && "
+                "(test -p /tmp/.gconnect_audio/spk.fifo || mkfifo -m 666 /tmp/.gconnect_audio/spk.fifo)"
+            )
+            container.exec_run(["bash", "-c", create_fifos_cmd])
+
+            # 4. Deploy audio bridge script
+            bridge_script_path = "/tmp/.gconnect_audio/gconnect_audio_bridge.py"
+            deploy_bridge_cmd = (
+                f"cat << 'EOF' > {bridge_script_path}\n{CONTAINER_AUDIO_BRIDGE_CODE}\nEOF\n"
+                f"chmod +x {bridge_script_path}"
+            )
+            container.exec_run(["bash", "-c", deploy_bridge_cmd])
+
+            # 5. Check if bridge daemon is already running; if not, launch in background
+            chk_bridge = container.exec_run(["pgrep", "-f", "gconnect_audio_bridge.py"])
+            bridge_exit_code = getattr(chk_bridge, "exit_code", 1)
+            if not isinstance(bridge_exit_code, int) or bridge_exit_code != 0:
+                logger.info("Launching container audio bridge daemon...")
+                container.exec_run(
+                    ["bash", "-c", f"nohup python3 {bridge_script_path} > /tmp/.gconnect_audio/bridge.log 2>&1 &"],
+                    detach=True,
+                )
+
+            logger.info("Container audio virtualization provisioned successfully.")
+            return True
+        except Exception as e:
+            logger.warning("Failed to provision container audio: %s", e)
+            return False
+
+    def ensure_sandbox_ready(self, container: Any = None) -> bool:
+        """Lifecycle hook to ensure all container services including audio virtualization are ready."""
+        return self.provision_container_audio(container)
 
     def get_status(self) -> Dict[str, Any]:
         """Returns the current container and Docker daemon status."""

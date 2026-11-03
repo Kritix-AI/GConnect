@@ -7,6 +7,7 @@ from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend import auth
+from backend.audio_router import audio_router
 from backend.cluster_manager import cluster_manager
 from backend.connection_tracker import connection_tracker
 from backend.config import settings
@@ -317,6 +318,21 @@ async def websocket_terminal(websocket: WebSocket):
         await pty_bridge.handle_websocket(websocket)
     finally:
         connection_tracker.unregister_socket(websocket, channel="terminal")
+
+
+@app.websocket("/ws/audio")
+async def websocket_audio(websocket: WebSocket):
+    if not await auth.authorize_websocket(websocket):
+        return
+    await websocket.accept()
+    c_ip = websocket.client.host if websocket.client else "unknown"
+    c_ua = websocket.headers.get("user-agent", "")
+    c_id = websocket.query_params.get("client_id")
+    connection_tracker.register_client(c_ip, c_ua, c_id, channel="audio", socket_obj=websocket)
+    try:
+        await audio_router.handle_websocket(websocket)
+    finally:
+        connection_tracker.unregister_socket(websocket, channel="audio")
 
 
 if FRONTEND_DIR.exists():
