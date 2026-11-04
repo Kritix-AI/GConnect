@@ -1,5 +1,11 @@
 # GConnect Changelog
 
+## 2.3.0 (2026-11-04) - Client-to-Container Bidirectional Audio Streaming & Meet-Style UI
+- **Bidirectional Audio**: Real-time microphone capture streamed to Docker container, and container audio output streamed back to client speakers.
+- **Virtual ALSA Device**: Standard Python libraries (`speech_recognition`, `sounddevice`, `pyaudio`) detect default virtual mic and speaker with zero code modification.
+- **Google Meet-Style Controls**: Header `[🎙️ Audio]` button with input/output device selectors and mute/unmute toggles.
+- **Audio Router**: Port 8001 WebSocket hub with 50ms jitter buffer, duplex echo ducking gate, and single active speaker arbitration.
+
 ## 2.2.2 (2026-10-31) - Bidirectional Audio Streaming, Self-Healing Docker, Connected Devices & IDE Enhancements
 
 ### Client-to-Container Bidirectional Audio & Microphone Streaming
