@@ -95,7 +95,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="GConnect - Universal Remote GPU Development Platform",
     description="Universal, turnkey remote GPU sharing platform and Web IDE for PyTorch, LLMs, Computer Vision, Voice AI, and Data Science.",
-    version="2.3.0",
+    version="2.3.2",
     lifespan=lifespan,
     # API surface is not public; docs would only help attackers.
     docs_url=None,

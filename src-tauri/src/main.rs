@@ -33,6 +33,8 @@ struct ConnectionConfig {
     url: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     token: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    workspace_dir: Option<String>,
 }
 
 impl Default for ConnectionConfig {
@@ -41,6 +43,7 @@ impl Default for ConnectionConfig {
             mode: "unconfigured".into(),
             url: None,
             token: None,
+            workspace_dir: None,
         }
     }
 }
@@ -116,7 +119,15 @@ fn data_dirs(app: &AppHandle) -> Result<(PathBuf, PathBuf, PathBuf), String> {
 /// Spawns the Python daemon sidecar, waits for /api/health, reads the token
 /// file the daemon generated, and publishes the info to the webview.
 fn start_backend(app: &AppHandle, host_mode: bool) -> Result<BackendInfo, String> {
-    let (workspace, runtime, logs) = data_dirs(app)?;
+    let (default_workspace, runtime, logs) = data_dirs(app)?;
+    let cfg = load_connection(app);
+    let workspace = cfg
+        .workspace_dir
+        .as_deref()
+        .filter(|s| !s.trim().is_empty())
+        .map(PathBuf::from)
+        .filter(|p| p.is_dir())
+        .unwrap_or(default_workspace);
     let port = find_free_port(8000);
     let bind_host = if host_mode { "0.0.0.0" } else { "127.0.0.1" };
     let allow_lan = if host_mode { "true" } else { "false" };
@@ -343,7 +354,11 @@ fn backend_url(app: AppHandle) -> Result<String, String> {
 /// reloaded webview waits for it via backend_info).
 #[tauri::command]
 fn set_connection(app: AppHandle, cfg: ConnectionConfig) -> Result<BackendInfo, String> {
+    let existing = load_connection(&app);
     let mut persisted = cfg;
+    if persisted.workspace_dir.is_none() {
+        persisted.workspace_dir = existing.workspace_dir;
+    }
 
     match persisted.mode.as_str() {
         "local" | "share" => {
@@ -411,6 +426,43 @@ fn restart_backend(app: AppHandle) -> Result<BackendInfo, String> {
     start_backend(&app, is_share)
 }
 
+/// Native folder selection dialog. When chosen, saves the workspace path in
+/// `connection.json` under `workspace_dir` and restarts the backend sidecar.
+#[tauri::command]
+fn open_folder_dialog(app: AppHandle) -> Result<Option<String>, String> {
+    let cfg = load_connection(&app);
+    let mut dialog = rfd::FileDialog::new().set_title("Open Workspace Folder");
+    if let Some(ref current) = cfg.workspace_dir {
+        if std::path::Path::new(current).is_dir() {
+            dialog = dialog.set_directory(current);
+        }
+    }
+
+    let folder = dialog.pick_folder();
+    let Some(path_buf) = folder else {
+        return Ok(None);
+    };
+
+    let path_str = path_buf.to_string_lossy().to_string();
+
+    let mut new_cfg = cfg;
+    if new_cfg.mode == "unconfigured" {
+        new_cfg.mode = "local".into();
+    }
+    new_cfg.workspace_dir = Some(path_str.clone());
+    save_connection(&app, &new_cfg)?;
+
+    let is_share = new_cfg.mode == "share";
+    if new_cfg.mode != "remote" {
+        kill_backend(&app);
+        *app.state::<BackendState>().info.lock().unwrap() = None;
+        std::thread::sleep(Duration::from_millis(800));
+        start_backend(&app, is_share)?;
+    }
+
+    Ok(Some(path_str))
+}
+
 #[tauri::command]
 fn request_firewall_rule() -> Result<bool, String> {
     #[cfg(target_os = "windows")]
@@ -418,7 +470,7 @@ fn request_firewall_rule() -> Result<bool, String> {
         use std::os::windows::process::CommandExt;
         let script = "Start-Process netsh -Verb RunAs -ArgumentList 'advfirewall firewall add rule name=\"GConnect Host\" dir=in action=allow protocol=TCP localport=8000,8001'";
         let _ = std::process::Command::new("powershell")
-            .args(&["-NoProfile", "-Command", script])
+            .args(["-NoProfile", "-Command", script])
             .creation_flags(0x08000000)
             .spawn()
             .map_err(|e| e.to_string())?;
@@ -543,7 +595,8 @@ fn main() {
             backend_url,
             restart_backend,
             set_connection,
-            request_firewall_rule
+            request_firewall_rule,
+            open_folder_dialog
         ])
         .setup(|app| {
             let handle = app.handle().clone();

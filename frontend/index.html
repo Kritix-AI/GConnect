@@ -129,20 +129,27 @@
     <!-- Left Sidebar: File Tree -->
     <aside class="sidebar" id="sidebar">
       <div class="sidebar-header">
-        <span class="sidebar-title">
+        <span class="sidebar-title" id="workspaceTitle" title="Current workspace">
           <i data-lucide="folder-git-2" class="icon-sm"></i>
-          WORKSPACE
+          <span id="workspaceNameLabel">WORKSPACE</span>
         </span>
         <div class="sidebar-actions">
+          <button class="icon-btn" id="btnOpenFolder" title="Open Folder">
+            <i data-lucide="folder-open" class="icon-sm"></i>
+          </button>
+          <button class="icon-btn" id="btnNewFolder" title="New Folder">
+            <i data-lucide="folder-plus" class="icon-sm"></i>
+          </button>
+          <button class="icon-btn" id="btnNewFile" title="New Python Script">
+            <i data-lucide="file-plus" class="icon-sm"></i>
+          </button>
           <button class="icon-btn" id="btnImportFiles" title="Import File(s) into Workspace">
             <i data-lucide="upload" class="icon-sm"></i>
           </button>
           <input type="file" id="fileImportInput" multiple style="display: none;" />
+          <input type="file" id="folderImportInput" webkitdirectory directory multiple style="display: none;" />
           <button class="icon-btn" id="btnExportZip" title="Export Workspace as ZIP">
             <i data-lucide="archive" class="icon-sm"></i>
-          </button>
-          <button class="icon-btn" id="btnNewFile" title="New Python Script">
-            <i data-lucide="file-plus" class="icon-sm"></i>
           </button>
           <button class="icon-btn" id="btnRefreshFiles" title="Refresh Tree">
             <i data-lucide="rotate-cw" class="icon-sm"></i>

@@ -1,5 +1,11 @@
 # GConnect Changelog
 
+## 2.3.2 (2026-11-04) - Workspace Open Folder, Collapsible Directory Explorer & Nested Directory Hierarchy
+- **Native Workspace Open Folder Dialog & Sidecar Dynamic Remounting**: Native OS directory picker dialog (`rfd::FileDialog` via Tauri IPC `open_folder_dialog`) allows selecting any local project folder. Automatically updates `connection.json`, restarts backend sidecar with `CONNECT_WORKSPACE_DIR`, and dynamically recreates the Docker sandbox container mounting the selected path to `/workspace`.
+- **Collapsible Directory Tree**: Interactive folder explorer with smooth 150ms rotating chevrons (`folder-chevron` rotating 90°), toggleable subfolder visibility, indented hierarchy layout, and state preservation (`expandedFolders` Set) across file tree refreshes.
+- **Nested Directory Creation & Directory Upload**: Support for creating nested directory structures (e.g. `models/nlp`) via `POST /api/files/create` and batch folder uploads preserving relative directory paths via `POST /api/files/upload` with robust path traversal protection.
+- **Active Workspace Display**: Active workspace folder name dynamically displayed in sidebar header (`WORKSPACE: <Name>`) retrieved via `GET /api/files/workspace-info`.
+
 ## 2.3.0 (2026-11-04) - Client-to-Container Bidirectional Audio Streaming & Meet-Style UI
 - **Bidirectional Audio**: Real-time microphone capture streamed to Docker container, and container audio output streamed back to client speakers.
 - **Virtual ALSA Device**: Standard Python libraries (`speech_recognition`, `sounddevice`, `pyaudio`) detect default virtual mic and speaker with zero code modification.

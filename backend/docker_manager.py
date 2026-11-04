@@ -438,7 +438,14 @@ class DockerSandboxManager:
     # Container lifecycle
     # ------------------------------------------------------------------
 
-    def _desired_config_fingerprint(self, workspace_path: str) -> str:
+    def _desired_config_fingerprint(self, workspace_path: Optional[str] = None) -> str:
+        if workspace_path is None:
+            workspace_path = str(settings.WORKSPACE_DIR.resolve())
+        else:
+            try:
+                workspace_path = str(Path(workspace_path).resolve())
+            except Exception:
+                workspace_path = str(workspace_path)
         payload = {
             "image": settings.CONTAINER_IMAGE,
             "shm": settings.SHM_SIZE,
@@ -471,13 +478,6 @@ class DockerSandboxManager:
         try:
             try:
                 container = self.client.containers.get(settings.CONTAINER_NAME)
-                if container.status != "running":
-                    logger.info(f"Starting stopped container {settings.CONTAINER_NAME}...")
-                    container.start()
-                    container.reload()
-                    self.provision_container_audio(container)
-                    return container
-
                 labels = container.attrs.get("Config", {}).get("Labels", {}) or {}
                 if labels.get(CONFIG_LABEL) != desired_fp:
                     # Also covers containers created before the fingerprint
@@ -493,6 +493,12 @@ class DockerSandboxManager:
                         logger.error(f"Could not remove outdated container: {rm_err}")
                         return container
                     # fall through to creation
+                elif container.status != "running":
+                    logger.info(f"Starting stopped container {settings.CONTAINER_NAME}...")
+                    container.start()
+                    container.reload()
+                    self.provision_container_audio(container)
+                    return container
                 else:
                     self.provision_container_audio(container)
                     return container

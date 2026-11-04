@@ -1,6 +1,6 @@
 {
   "name": "gconnect",
-  "version": "2.3.0",
+  "version": "2.3.2",
   "private": true,
   "description": "GConnect - Remote GPU Development Platform (desktop)",
   "scripts": {

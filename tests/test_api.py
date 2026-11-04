@@ -158,3 +158,103 @@ def test_upload_files_and_traversal_prevention(authed_client, isolated_workspace
     res3 = authed_client.post("/api/files/upload", files=traversal_files, data={"target_dir": ""})
     assert res3.status_code == 200
     assert (isolated_workspace / "evil.py").exists()
+
+
+def test_workspace_info(authed_client, isolated_workspace):
+    # Authenticated request returns workspace_name and workspace_path
+    res = authed_client.get("/api/files/workspace-info")
+    assert res.status_code == 200
+    data = res.json()
+    assert "workspace_name" in data
+    assert "workspace_path" in data
+    assert data["workspace_name"] == isolated_workspace.name
+    assert data["workspace_path"] == str(isolated_workspace.resolve())
+
+    # Unauthenticated request must return 401
+    from backend.main import app
+    from fastapi.testclient import TestClient
+    unauth_client = TestClient(app)
+    unauth_res = unauth_client.get("/api/files/workspace-info")
+    assert unauth_res.status_code == 401
+
+
+def test_directory_creation_single_and_nested(authed_client, isolated_workspace):
+    # Single directory creation
+    single_res = authed_client.post("/api/files/create", json={"path": "models", "is_directory": True})
+    assert single_res.status_code == 200
+    single_data = single_res.json()
+    assert single_data["status"] == "success"
+    assert single_data["is_directory"] is True
+    assert (isolated_workspace / "models").is_dir()
+
+    # Nested subdirectories creation (e.g. models/nlp/transformers)
+    nested_res = authed_client.post(
+        "/api/files/create", json={"path": "models/nlp/transformers", "is_directory": True}
+    )
+    assert nested_res.status_code == 200
+    nested_data = nested_res.json()
+    assert nested_data["status"] == "success"
+    assert (isolated_workspace / "models" / "nlp" / "transformers").is_dir()
+
+    # Attempting to re-create an existing directory raises 409 Conflict
+    recreate_res = authed_client.post(
+        "/api/files/create", json={"path": "models/nlp", "is_directory": True}
+    )
+    assert recreate_res.status_code == 409
+    assert (isolated_workspace / "models" / "nlp").is_dir()
+
+    # Directory creation attempting path traversal outside workspace is blocked (403)
+    traversal_res = authed_client.post(
+        "/api/files/create", json={"path": "../escaped_dir", "is_directory": True}
+    )
+    assert traversal_res.status_code == 403
+    assert not (isolated_workspace.parent / "escaped_dir").exists()
+
+
+def test_relative_path_directory_uploads(authed_client, isolated_workspace):
+    # Upload folder tree preserving nested relative paths (from webkitdirectory / folder import)
+    folder_files = [
+        ("files", ("src/models/nlp/bert.py", b"class BertModel: pass\n", "text/x-python")),
+        ("files", ("src/models/nlp/config.json", b'{"vocab_size": 30522}', "application/json")),
+        ("files", ("src/utils/tokenization.py", b"def tokenize(text): return []\n", "text/x-python")),
+        ("files", ("docs/readme.txt", b"Documentation notes", "text/plain")),
+    ]
+    res = authed_client.post("/api/files/upload", files=folder_files, data={"target_dir": ""})
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "success"
+    assert data["count"] == 4
+
+    # Verify nested folder hierarchy on disk
+    bert_path = isolated_workspace / "src" / "models" / "nlp" / "bert.py"
+    config_path = isolated_workspace / "src" / "models" / "nlp" / "config.json"
+    tok_path = isolated_workspace / "src" / "utils" / "tokenization.py"
+    doc_path = isolated_workspace / "docs" / "readme.txt"
+
+    assert bert_path.is_file()
+    assert bert_path.read_text(encoding="utf-8") == "class BertModel: pass\n"
+    assert config_path.is_file()
+    assert config_path.read_text(encoding="utf-8") == '{"vocab_size": 30522}'
+    assert tok_path.is_file()
+    assert tok_path.read_text(encoding="utf-8") == "def tokenize(text): return []\n"
+    assert doc_path.is_file()
+    assert doc_path.read_text(encoding="utf-8") == "Documentation notes"
+
+    # Upload directory tree with Windows-style backslash paths into target_dir
+    win_files = [
+        ("files", ("deep\\layers\\dense.py", b"class Dense: pass\n", "text/x-python")),
+    ]
+    res2 = authed_client.post("/api/files/upload", files=win_files, data={"target_dir": "extra_module"})
+    assert res2.status_code == 200
+    assert (isolated_workspace / "extra_module" / "deep" / "layers" / "dense.py").is_file()
+
+    # Upload relative path with traversal segments neutralized safely
+    traversal_files = [
+        ("files", ("safe_dir/../../traversal_attempt.py", b"data", "text/x-python")),
+    ]
+    res3 = authed_client.post("/api/files/upload", files=traversal_files, data={"target_dir": ""})
+    assert res3.status_code == 200
+    # Must remain safely inside isolated_workspace and not escape into parent
+    assert (isolated_workspace / "traversal_attempt.py").exists() or (isolated_workspace / "safe_dir" / "traversal_attempt.py").exists()
+    assert not (isolated_workspace.parent / "traversal_attempt.py").exists()
+

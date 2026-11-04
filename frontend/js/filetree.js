@@ -4,6 +4,14 @@ class FileTreeManager {
   constructor() {
     this.container = document.getElementById("fileTreeContainer");
     this.activePath = null;
+    this.expandedFolders = new Set();
+
+    // Sidebar header buttons & elements
+    this.btnOpenFolder = document.getElementById("btnOpenFolder");
+    this.btnNewFolder = document.getElementById("btnNewFolder");
+    this.folderImportInput = document.getElementById("folderImportInput");
+    this.workspaceNameLabel = document.getElementById("workspaceNameLabel");
+    this.workspaceTitle = document.getElementById("workspaceTitle");
 
     // New file modal
     this.modalOverlay = document.getElementById("modalOverlay");
@@ -35,10 +43,19 @@ class FileTreeManager {
 
   init() {
     this.bindEvents();
+    this.updateWorkspaceInfo();
     this.loadTree();
   }
 
   bindEvents() {
+    if (this.btnOpenFolder) {
+      this.btnOpenFolder.addEventListener("click", () => this.openFolder());
+    }
+
+    if (this.btnNewFolder) {
+      this.btnNewFolder.addEventListener("click", () => this.createNewFolder());
+    }
+
     if (this.btnRefreshFiles) {
       this.btnRefreshFiles.addEventListener("click", () => this.loadTree());
     }
@@ -84,6 +101,40 @@ class FileTreeManager {
           alert(`Failed to import files: ${err.message || err}`);
         } finally {
           this.fileImportInput.value = "";
+        }
+      });
+    }
+
+    if (this.folderImportInput) {
+      this.folderImportInput.addEventListener("change", async (e) => {
+        const files = e.target.files;
+        if (!files || !files.length) return;
+
+        const formData = new FormData();
+        for (let i = 0; i < files.length; i++) {
+          const file = files[i];
+          const relPath = file.webkitRelativePath || file.name;
+          formData.append("files", file, relPath);
+          formData.append("relative_paths", relPath);
+        }
+        formData.append("target_dir", "");
+
+        try {
+          const res = await window.authManager.api("/api/files/upload", {
+            method: "POST",
+            body: formData,
+          });
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            alert(`Folder import failed: ${err.detail || res.statusText}`);
+            return;
+          }
+          await this.loadTree();
+        } catch (err) {
+          console.error("Folder upload error:", err);
+          alert(`Failed to import folder: ${err.message || err}`);
+        } finally {
+          this.folderImportInput.value = "";
         }
       });
     }
@@ -135,7 +186,123 @@ class FileTreeManager {
     });
   }
 
+  async openFolder() {
+    const isTauri = typeof window !== "undefined" && !!(window.__TAURI__ || window.__TAURI_INTERNALS__);
+    if (isTauri) {
+      try {
+        let selected = null;
+        if (window.__TAURI__?.core?.invoke) {
+          selected = await window.__TAURI__.core.invoke("open_folder_dialog");
+        } else if (window.__TAURI__?.invoke) {
+          selected = await window.__TAURI__.invoke("open_folder_dialog");
+        }
+        if (selected) {
+          // Path chosen; backend sidecar restarts with CONNECT_WORKSPACE_DIR
+          setTimeout(() => {
+            window.location.reload();
+          }, 1000);
+        }
+      } catch (err) {
+        console.error("open_folder_dialog error:", err);
+        alert(`Failed to open folder dialog: ${err.message || err}`);
+      }
+    } else {
+      // Browser mode: prompt user for directory path or trigger folder import
+      const dirPath = prompt(
+        "Enter workspace directory path, or leave blank to import a folder from your disk:"
+      );
+      if (dirPath === null) return;
+      const trimmed = dirPath.trim();
+      if (!trimmed) {
+        if (this.folderImportInput) {
+          this.folderImportInput.click();
+        }
+      } else {
+        try {
+          const res = await window.authManager.api("/api/files/create", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ path: trimmed, is_directory: true }),
+          });
+          if (res.ok) {
+            this.expandedFolders.add(trimmed);
+            await this.loadTree();
+          } else {
+            const err = await res.json().catch(() => ({}));
+            alert(`Could not set folder: ${err.detail || res.statusText}`);
+          }
+        } catch (e) {
+          console.error("Browser mode open folder error:", e);
+          alert(`Could not open folder: ${e.message || e}`);
+        }
+      }
+    }
+  }
+
+  async createNewFolder(parentDir = "") {
+    const defaultVal = parentDir ? `${parentDir}/` : "models/nlp";
+    const folderName = prompt("Enter folder name (e.g. models/nlp):", defaultVal);
+    if (!folderName) return;
+    const trimmed = folderName.trim();
+    if (!trimmed) return;
+
+    try {
+      const res = await window.authManager.api("/api/files/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          path: trimmed,
+          is_directory: true,
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert(err.detail || "Failed to create folder.");
+        return;
+      }
+
+      // Track created folder in expandedFolders
+      const segments = trimmed.split("/").filter(Boolean);
+      let cur = "";
+      for (const seg of segments) {
+        cur = cur ? `${cur}/${seg}` : seg;
+        this.expandedFolders.add(cur);
+      }
+
+      await this.loadTree();
+    } catch (err) {
+      console.error("Create folder error:", err);
+      alert(`Failed to create folder: ${err.message || err}`);
+    }
+  }
+
+  async updateWorkspaceInfo() {
+    const label = document.getElementById("workspaceNameLabel");
+    const titleEl = document.getElementById("workspaceTitle");
+    if (!label) return;
+
+    try {
+      const res = await window.authManager.api("/api/files/workspace-info");
+      if (res.ok) {
+        const data = await res.json();
+        const wsName = data.workspace_name;
+        if (wsName) {
+          label.textContent = `WORKSPACE: ${wsName}`;
+        } else {
+          label.textContent = "WORKSPACE";
+        }
+        if (titleEl && data.workspace_path) {
+          titleEl.title = `Current workspace: ${data.workspace_path}`;
+        }
+      }
+    } catch (err) {
+      console.warn("Could not fetch workspace-info:", err);
+    }
+  }
+
   async loadTree() {
+    this.updateWorkspaceInfo();
     try {
       const res = await window.authManager.api("/api/files");
       if (!res.ok) throw new Error("Failed to load workspace files");
@@ -171,46 +338,129 @@ class FileTreeManager {
     }
   }
 
+  toggleFolder(path, rowEl = null, childrenEl = null) {
+    if (!rowEl && this.container) {
+      rowEl = this.container.querySelector(`.tree-folder-row[data-path="${path.replace(/"/g, '\\"')}"]`);
+    }
+    if (!childrenEl && this.container) {
+      childrenEl = this.container.querySelector(`.tree-children[data-folder-path="${path.replace(/"/g, '\\"')}"]`);
+    }
+
+    const isExpanded = this.expandedFolders.has(path);
+    if (isExpanded) {
+      this.expandedFolders.delete(path);
+      if (childrenEl) childrenEl.classList.add("hidden");
+      if (rowEl) {
+        const chevron = rowEl.querySelector(".folder-chevron");
+        if (chevron) chevron.classList.remove("open");
+        const folderIcon = rowEl.querySelector(".folder-icon");
+        if (folderIcon) {
+          folderIcon.setAttribute("data-lucide", "folder");
+          if (window.lucide) window.lucide.createIcons();
+        }
+      }
+    } else {
+      this.expandedFolders.add(path);
+      if (childrenEl) childrenEl.classList.remove("hidden");
+      if (rowEl) {
+        const chevron = rowEl.querySelector(".folder-chevron");
+        if (chevron) chevron.classList.add("open");
+        const folderIcon = rowEl.querySelector(".folder-icon");
+        if (folderIcon) {
+          folderIcon.setAttribute("data-lucide", "folder-open");
+          if (window.lucide) window.lucide.createIcons();
+        }
+      }
+    }
+  }
+
   _buildTreeElements(items, parentEl, depth) {
     items.forEach((item) => {
-      const itemEl = document.createElement("div");
-      itemEl.className = "tree-item";
-      itemEl.dataset.path = item.path;
-      itemEl.style.paddingLeft = `${depth * 14 + 12}px`;
-      if (item.path === this.activePath) {
-        itemEl.classList.add("active");
-      }
+      const isDir = item.type === "directory";
+      const isExpanded = isDir && this.expandedFolders.has(item.path);
+      const isAudio = !isDir && AUDIO_EXTS.some((ext) => item.name.toLowerCase().endsWith(ext));
 
-      const isAudio = item.type === "file" && AUDIO_EXTS.some((ext) => item.name.toLowerCase().endsWith(ext));
       let iconName = "file-code-2";
       let iconColor = "#58a6ff";
-
-      if (item.type === "directory") {
-        iconName = "folder";
+      if (isDir) {
+        iconName = isExpanded ? "folder-open" : "folder";
         iconColor = "#e3b341";
       } else if (isAudio) {
         iconName = "music";
         iconColor = "#a371f7";
       }
 
-      // Names are escaped: file names are user/API-controlled content.
-      itemEl.innerHTML = `
-        <div class="tree-item-label">
-          <i data-lucide="${iconName}" class="icon-sm" style="color: ${iconColor};"></i>
-          <span title="${escapeHtml(item.path)}">${escapeHtml(item.name)}</span>
-        </div>
-        <div class="tree-item-actions">
+      const itemEl = document.createElement("div");
+      itemEl.className = `tree-item ${isDir ? "tree-folder-row" : "tree-file-row"}`;
+      itemEl.dataset.path = item.path;
+      itemEl.dataset.type = item.type;
+      itemEl.style.paddingLeft = `${depth * 14 + 10}px`;
+      if (item.path === this.activePath) {
+        itemEl.classList.add("active");
+      }
+
+      const chevronHtml = isDir
+        ? `<i data-lucide="chevron-right" class="folder-chevron${isExpanded ? " open" : ""}"></i>`
+        : `<span class="chevron-spacer"></span>`;
+
+      const actionsHtml = isDir
+        ? `
+          <button class="icon-btn btn-new-file-folder" title="New File in Folder">
+            <i data-lucide="file-plus" class="icon-xs"></i>
+          </button>
           <button class="icon-btn btn-rename-item" title="Rename / Move">
             <i data-lucide="pencil" class="icon-xs"></i>
           </button>
-          <button class="icon-btn btn-download-item" title="Download ${item.type === "directory" ? "as ZIP" : "file"}">
+          <button class="icon-btn btn-download-item" title="Download as ZIP">
+            <i data-lucide="download" class="icon-xs"></i>
+          </button>
+          <button class="icon-btn btn-delete-file" title="Delete Folder">
+            <i data-lucide="trash" class="icon-xs"></i>
+          </button>
+        `
+        : `
+          <button class="icon-btn btn-rename-item" title="Rename / Move">
+            <i data-lucide="pencil" class="icon-xs"></i>
+          </button>
+          <button class="icon-btn btn-download-item" title="Download file">
             <i data-lucide="download" class="icon-xs"></i>
           </button>
           <button class="icon-btn btn-delete-file" title="Delete">
             <i data-lucide="trash" class="icon-xs"></i>
           </button>
+        `;
+
+      itemEl.innerHTML = `
+        <div class="tree-item-label">
+          ${chevronHtml}
+          <i data-lucide="${iconName}" class="icon-sm ${isDir ? "folder-icon" : ""}" style="color: ${iconColor};"></i>
+          <span class="tree-item-name" title="${escapeHtml(item.path)}">${escapeHtml(item.name)}</span>
+        </div>
+        <div class="tree-item-actions">
+          ${actionsHtml}
         </div>
       `;
+
+      parentEl.appendChild(itemEl);
+
+      let childrenEl = null;
+      if (isDir) {
+        childrenEl = document.createElement("div");
+        childrenEl.className = `tree-children${isExpanded ? "" : " hidden"}`;
+        childrenEl.dataset.folderPath = item.path;
+
+        if (item.children && item.children.length > 0) {
+          this._buildTreeElements(item.children, childrenEl, depth + 1);
+        } else {
+          const emptyEl = document.createElement("div");
+          emptyEl.className = "tree-empty-folder";
+          emptyEl.style.paddingLeft = `${(depth + 1) * 14 + 10}px`;
+          emptyEl.textContent = "(empty)";
+          childrenEl.appendChild(emptyEl);
+        }
+
+        parentEl.appendChild(childrenEl);
+      }
 
       itemEl.addEventListener("click", (e) => {
         if (e.target.closest(".btn-download-item")) {
@@ -233,6 +483,18 @@ class FileTreeManager {
           return;
         }
 
+        if (e.target.closest(".btn-new-file-folder")) {
+          e.stopPropagation();
+          this.openNewFileModal(item.path);
+          return;
+        }
+
+        if (isDir) {
+          e.stopPropagation();
+          this.toggleFolder(item.path, itemEl, childrenEl);
+          return;
+        }
+
         if (item.type === "file") {
           if (isAudio) {
             this.openAudioModal(item.path);
@@ -241,12 +503,6 @@ class FileTreeManager {
           }
         }
       });
-
-      parentEl.appendChild(itemEl);
-
-      if (item.type === "directory" && item.children) {
-        this._buildTreeElements(item.children, parentEl, depth + 1);
-      }
     });
   }
 
@@ -323,10 +579,10 @@ class FileTreeManager {
     this.audioModalOverlay.classList.add("hidden");
   }
 
-  openNewFileModal() {
+  openNewFileModal(parentDir = "") {
     if (this.modalOverlay) {
       this.modalOverlay.classList.remove("hidden");
-      this.newFileInput.value = "";
+      this.newFileInput.value = parentDir ? `${parentDir}/` : "";
       this.newFileInput.focus();
     }
   }
@@ -355,6 +611,18 @@ class FileTreeManager {
         const err = await res.json().catch(() => ({}));
         alert(err.detail || "Failed to create file.");
         return;
+      }
+
+      // Auto-expand parent folders of the created file
+      const slashIdx = filename.lastIndexOf("/");
+      if (slashIdx !== -1) {
+        const parentPath = filename.substring(0, slashIdx);
+        const parts = parentPath.split("/").filter(Boolean);
+        let cur = "";
+        for (const p of parts) {
+          cur = cur ? `${cur}/${p}` : p;
+          this.expandedFolders.add(cur);
+        }
       }
 
       this.closeModal();
@@ -407,6 +675,18 @@ class FileTreeManager {
         return;
       }
 
+      // Preserve expanded state for renamed folder and its subpaths
+      if (this.expandedFolders.has(oldPath)) {
+        this.expandedFolders.delete(oldPath);
+        this.expandedFolders.add(newPath);
+      }
+      for (const p of Array.from(this.expandedFolders)) {
+        if (p.startsWith(`${oldPath}/`)) {
+          this.expandedFolders.delete(p);
+          this.expandedFolders.add(newPath + p.slice(oldPath.length));
+        }
+      }
+
       this.closeRenameModal();
       await this.loadTree();
 
@@ -435,6 +715,14 @@ class FileTreeManager {
       });
 
       if (!res.ok) throw new Error("Failed to delete");
+
+      // Clean up expandedFolders set
+      this.expandedFolders.delete(path);
+      for (const p of Array.from(this.expandedFolders)) {
+        if (p.startsWith(`${path}/`)) {
+          this.expandedFolders.delete(p);
+        }
+      }
 
       // If open in the editor, close it without a second confirmation
       // (deletion was already confirmed above).

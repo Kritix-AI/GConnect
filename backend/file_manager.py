@@ -146,6 +146,16 @@ def list_files() -> Dict[str, Any]:
     }
 
 
+@router.get("/workspace-info")
+def get_workspace_info() -> Dict[str, Any]:
+    """Returns the active workspace directory name and resolved path."""
+    path = settings.WORKSPACE_DIR.resolve()
+    return {
+        "workspace_name": path.name,
+        "workspace_path": str(path),
+    }
+
+
 @router.get("/content")
 async def get_file_content(path: str = Query(..., description="Relative path in workspace")) -> Dict[str, Any]:
     """Reads file text content from the workspace (size-capped)."""
@@ -221,9 +231,9 @@ def create_item(req: FileCreateRequest) -> Dict[str, Any]:
 
     try:
         if req.is_directory:
-            target.mkdir(parents=True, exist_ok=True)
+            os.makedirs(target, exist_ok=True)
         else:
-            target.parent.mkdir(parents=True, exist_ok=True)
+            os.makedirs(target.parent, exist_ok=True)
             target.touch()
         return {
             "status": "success",
@@ -239,24 +249,35 @@ async def upload_files(
     target_dir: str = Form(""),
 ) -> Dict[str, Any]:
     """Uploads one or more files into the workspace or a specified subfolder.
-    Enforces strict path traversal checks on destination folder and filenames."""
+    Enforces strict path traversal checks on destination folder and filenames.
+    Preserves relative subfolder hierarchy when uploading directories."""
     dest_dir = _resolve_safe_path(target_dir)
     if dest_dir.is_file():
         dest_dir = dest_dir.parent
-    dest_dir.mkdir(parents=True, exist_ok=True)
+    os.makedirs(dest_dir, exist_ok=True)
 
     base = settings.WORKSPACE_DIR.resolve()
     uploaded: List[Dict[str, Any]] = []
 
     for file in files:
-        safe_name = Path(file.filename or "uploaded_file").name
-        if not safe_name or safe_name in ("", ".", ".."):
+        raw_name = (file.filename or "uploaded_file").replace("\\", "/")
+        # Sanitize components to prevent path traversal while preserving relative subfolder hierarchy
+        parts = [
+            p.strip()
+            for p in raw_name.split("/")
+            if p.strip() and p.strip() not in (".", "..") and ":" not in p
+        ]
+        if not parts:
             continue
 
-        target_path = _resolve_safe_path(
-            f"{target_dir}/{safe_name}" if target_dir.strip() and target_dir.strip() != "." else safe_name
-        )
-        target_path.parent.mkdir(parents=True, exist_ok=True)
+        rel_subpath = "/".join(parts)
+        if target_dir.strip() and target_dir.strip() != ".":
+            combined = f"{target_dir.strip().rstrip('/')}/{rel_subpath}"
+        else:
+            combined = rel_subpath
+
+        target_path = _resolve_safe_path(combined)
+        os.makedirs(target_path.parent, exist_ok=True)
 
         bytes_written = 0
         async with aiofiles.open(target_path, "wb") as out_f:
@@ -266,7 +287,7 @@ async def upload_files(
 
         rel_path = str(target_path.relative_to(base)).replace("\\", "/")
         uploaded.append({
-            "name": safe_name,
+            "name": target_path.name,
             "path": rel_path,
             "bytes": bytes_written,
         })
