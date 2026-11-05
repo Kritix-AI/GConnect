@@ -258,3 +258,63 @@ def test_relative_path_directory_uploads(authed_client, isolated_workspace):
     assert (isolated_workspace / "traversal_attempt.py").exists() or (isolated_workspace / "safe_dir" / "traversal_attempt.py").exists()
     assert not (isolated_workspace.parent / "traversal_attempt.py").exists()
 
+
+def test_upload_with_rel_path_form_field(authed_client, isolated_workspace):
+    """Verifies POST /api/files/upload explicitly passing the rel_path form field."""
+    # 1. Single file upload with nested rel_path form field preserving folder structure
+    file_data = [("files", ("upload_source.py", b"x = 42\n", "text/x-python"))]
+    res = authed_client.post(
+        "/api/files/upload",
+        files=file_data,
+        data={"target_dir": "", "rel_path": "deep/nested/subfolder/custom_script.py"},
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "success"
+    assert data["count"] == 1
+    assert data["files"][0]["name"] == "custom_script.py"
+    assert data["files"][0]["path"] == "deep/nested/subfolder/custom_script.py"
+
+    dest_file = isolated_workspace / "deep" / "nested" / "subfolder" / "custom_script.py"
+    assert dest_file.is_file()
+    assert dest_file.read_text(encoding="utf-8") == "x = 42\n"
+
+    # 2. Upload with rel_path combined with target_dir
+    res2 = authed_client.post(
+        "/api/files/upload",
+        files=[("files", ("util.py", b"def helper(): pass\n", "text/x-python"))],
+        data={"target_dir": "my_package", "rel_path": "core/utils/util.py"},
+    )
+    assert res2.status_code == 200
+    data2 = res2.json()
+    assert data2["status"] == "success"
+    assert data2["files"][0]["path"] == "my_package/core/utils/util.py"
+    dest_file2 = isolated_workspace / "my_package" / "core" / "utils" / "util.py"
+    assert dest_file2.is_file()
+    assert dest_file2.read_text(encoding="utf-8") == "def helper(): pass\n"
+
+    # 3. Upload with rel_path as directory with trailing slash
+    res3 = authed_client.post(
+        "/api/files/upload",
+        files=[("files", ("data.csv", b"a,b,c\n1,2,3\n", "text/csv"))],
+        data={"target_dir": "", "rel_path": "datasets/tabular/"},
+    )
+    assert res3.status_code == 200
+    data3 = res3.json()
+    assert data3["status"] == "success"
+    assert data3["files"][0]["path"] == "datasets/tabular/data.csv"
+    dest_file3 = isolated_workspace / "datasets" / "tabular" / "data.csv"
+    assert dest_file3.is_file()
+    assert dest_file3.read_text(encoding="utf-8") == "a,b,c\n1,2,3\n"
+
+    # 4. Traversal attack via rel_path is sanitized safely within workspace
+    res4 = authed_client.post(
+        "/api/files/upload",
+        files=[("files", ("payload.py", b"exploit = False\n", "text/x-python"))],
+        data={"target_dir": "", "rel_path": "../../escaped.py"},
+    )
+    assert res4.status_code == 200
+    assert not (isolated_workspace.parent / "escaped.py").exists()
+    assert (isolated_workspace / "escaped.py").exists()
+
+

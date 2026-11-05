@@ -155,6 +155,7 @@ def test_docker_manager_provisioning_graceful_on_error():
     mgr.client = None
     mgr._init_lock = threading.Lock()
     mgr._last_init_attempt = 0.0
+    mgr._ensure_docker = lambda force=False: False
 
     # When container is None and Docker is offline
     assert mgr.provision_container_audio(None) is False

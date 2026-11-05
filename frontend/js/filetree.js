@@ -9,6 +9,12 @@ class FileTreeManager {
     // Sidebar header buttons & elements
     this.btnOpenFolder = document.getElementById("btnOpenFolder");
     this.btnNewFolder = document.getElementById("btnNewFolder");
+    this.importDropdownWrapper = document.querySelector(".import-dropdown-wrapper");
+    this.importDropdownMenu = document.getElementById("importDropdownMenu");
+    this.btnImportFiles = document.getElementById("btnImportFiles");
+    this.btnImportFilesOption = document.getElementById("btnImportFilesOption");
+    this.btnImportFolderOption = document.getElementById("btnImportFolderOption");
+    this.fileImportInput = document.getElementById("fileImportInput");
     this.folderImportInput = document.getElementById("folderImportInput");
     this.workspaceNameLabel = document.getElementById("workspaceNameLabel");
     this.workspaceTitle = document.getElementById("workspaceTitle");
@@ -21,8 +27,6 @@ class FileTreeManager {
     this.btnNewFile = document.getElementById("btnNewFile");
     this.btnRefreshFiles = document.getElementById("btnRefreshFiles");
     this.btnExportZip = document.getElementById("btnExportZip");
-    this.btnImportFiles = document.getElementById("btnImportFiles");
-    this.fileImportInput = document.getElementById("fileImportInput");
 
     // Rename modal
     this.renameOverlay = document.getElementById("renameOverlay");
@@ -70,38 +74,49 @@ class FileTreeManager {
       });
     }
 
-    if (this.btnImportFiles && this.fileImportInput) {
-      this.btnImportFiles.addEventListener("click", () => {
+    // Unified Import Dropdown Menu
+    if (this.btnImportFiles) {
+      this.btnImportFiles.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this.toggleImportDropdown();
+      });
+    }
+
+    document.addEventListener("click", (e) => {
+      if (this.importDropdownMenu && !this.importDropdownMenu.classList.contains("hidden")) {
+        if (!e.target.closest(".import-dropdown-wrapper")) {
+          this.closeImportDropdown();
+        }
+      }
+    });
+
+    if (this.btnImportFilesOption && this.fileImportInput) {
+      this.btnImportFilesOption.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this.closeImportDropdown();
         this.fileImportInput.click();
       });
+    }
 
+    if (this.btnImportFolderOption && this.folderImportInput) {
+      this.btnImportFolderOption.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this.closeImportDropdown();
+        this.folderImportInput.click();
+      });
+    }
+
+    if (this.fileImportInput) {
       this.fileImportInput.addEventListener("change", async (e) => {
         const files = e.target.files;
         if (!files || !files.length) return;
-
-        const formData = new FormData();
-        for (let i = 0; i < files.length; i++) {
-          formData.append("files", files[i]);
-        }
-        formData.append("target_dir", "");
-
-        try {
-          const res = await window.authManager.api("/api/files/upload", {
-            method: "POST",
-            body: formData,
-          });
-          if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            alert(`Import failed: ${err.detail || res.statusText}`);
-            return;
-          }
-          await this.loadTree();
-        } catch (err) {
-          console.error("Upload error:", err);
-          alert(`Failed to import files: ${err.message || err}`);
-        } finally {
-          this.fileImportInput.value = "";
-        }
+        await this.uploadFilesList(
+          Array.from(files).map((f) => ({
+            file: f,
+            relPath: f.webkitRelativePath || f.name,
+          }))
+        );
+        this.fileImportInput.value = "";
       });
     }
 
@@ -109,33 +124,52 @@ class FileTreeManager {
       this.folderImportInput.addEventListener("change", async (e) => {
         const files = e.target.files;
         if (!files || !files.length) return;
+        await this.uploadFilesList(
+          Array.from(files).map((f) => ({
+            file: f,
+            relPath: f.webkitRelativePath || f.name,
+          }))
+        );
+        this.folderImportInput.value = "";
+      });
+    }
 
-        const formData = new FormData();
-        for (let i = 0; i < files.length; i++) {
-          const file = files[i];
-          const relPath = file.webkitRelativePath || file.name;
-          formData.append("files", file, relPath);
-          formData.append("relative_paths", relPath);
-        }
-        formData.append("target_dir", "");
+    // Drag-and-Drop file & folder uploads
+    if (this.container) {
+      this.dragEnterCount = 0;
 
-        try {
-          const res = await window.authManager.api("/api/files/upload", {
-            method: "POST",
-            body: formData,
-          });
-          if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            alert(`Folder import failed: ${err.detail || res.statusText}`);
-            return;
-          }
-          await this.loadTree();
-        } catch (err) {
-          console.error("Folder upload error:", err);
-          alert(`Failed to import folder: ${err.message || err}`);
-        } finally {
-          this.folderImportInput.value = "";
+      this.container.addEventListener("dragenter", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        this.dragEnterCount++;
+        this.container.classList.add("drag-over");
+      });
+
+      this.container.addEventListener("dragover", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.dataTransfer) {
+          e.dataTransfer.dropEffect = "copy";
         }
+        this.container.classList.add("drag-over");
+      });
+
+      this.container.addEventListener("dragleave", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        this.dragEnterCount--;
+        if (this.dragEnterCount <= 0) {
+          this.dragEnterCount = 0;
+          this.container.classList.remove("drag-over");
+        }
+      });
+
+      this.container.addEventListener("drop", async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        this.dragEnterCount = 0;
+        this.container.classList.remove("drag-over");
+        await this.handleDrop(e);
       });
     }
 
@@ -179,11 +213,155 @@ class FileTreeManager {
 
     window.addEventListener("keydown", (e) => {
       if (e.key === "Escape") {
+        this.closeImportDropdown();
         if (this.audioModalOverlay && !this.audioModalOverlay.classList.contains("hidden")) {
           this.closeAudioModal();
         }
       }
     });
+  }
+
+  toggleImportDropdown() {
+    if (this.importDropdownMenu) {
+      this.importDropdownMenu.classList.toggle("hidden");
+    }
+  }
+
+  closeImportDropdown() {
+    if (this.importDropdownMenu) {
+      this.importDropdownMenu.classList.add("hidden");
+    }
+  }
+
+  async uploadFilesList(items) {
+    if (!items || !items.length) return;
+
+    const formData = new FormData();
+    for (const item of items) {
+      const file = item.file;
+      const relPath = (item.relPath || file.webkitRelativePath || file.name).replace(/\\/g, "/");
+      formData.append("files", file, relPath);
+      formData.append("rel_path", relPath);
+      formData.append("relative_paths", relPath);
+    }
+    formData.append("target_dir", "");
+
+    try {
+      const res = await window.authManager.api("/api/files/upload", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert(`Upload failed: ${err.detail || res.statusText}`);
+        return;
+      }
+
+      // Auto-expand uploaded directories so newly uploaded items are visible
+      for (const item of items) {
+        const relPath = (item.relPath || item.file.webkitRelativePath || item.file.name).replace(/\\/g, "/");
+        const slashIdx = relPath.lastIndexOf("/");
+        if (slashIdx !== -1) {
+          const dirPath = relPath.substring(0, slashIdx);
+          const parts = dirPath.split("/").filter(Boolean);
+          let cur = "";
+          for (const p of parts) {
+            cur = cur ? `${cur}/${p}` : p;
+            this.expandedFolders.add(cur);
+          }
+        }
+      }
+
+      await this.loadTree();
+    } catch (err) {
+      console.error("Upload error:", err);
+      alert(`Failed to upload: ${err.message || err}`);
+    }
+  }
+
+  async handleDrop(e) {
+    try {
+      const items = e.dataTransfer?.items;
+      const filesToUpload = [];
+
+      if (items && items.length > 0 && typeof items[0].webkitGetAsEntry === "function") {
+        const entryPromises = [];
+        for (let i = 0; i < items.length; i++) {
+          const item = items[i];
+          if (item.kind && item.kind !== "file") continue;
+          const entry = item.webkitGetAsEntry();
+          if (entry) {
+            entryPromises.push(this._traverseFileEntry(entry, ""));
+          }
+        }
+        const results = await Promise.all(entryPromises);
+        for (const res of results) {
+          filesToUpload.push(...res);
+        }
+      }
+
+      // Fallback: if webkitGetAsEntry didn't produce files or isn't available
+      if (filesToUpload.length === 0 && e.dataTransfer?.files?.length > 0) {
+        for (let i = 0; i < e.dataTransfer.files.length; i++) {
+          const file = e.dataTransfer.files[i];
+          filesToUpload.push({
+            file: file,
+            relPath: file.webkitRelativePath || file.name,
+          });
+        }
+      }
+
+      if (filesToUpload.length > 0) {
+        await this.uploadFilesList(filesToUpload);
+      }
+    } catch (err) {
+      console.error("Drop upload error:", err);
+      alert(`Drop upload failed: ${err.message || err}`);
+    }
+  }
+
+  async _traverseFileEntry(entry, parentPath = "") {
+    const currentPath = parentPath ? `${parentPath}/${entry.name}` : entry.name;
+
+    if (entry.isFile) {
+      const file = await new Promise((resolve, reject) => {
+        entry.file(resolve, reject);
+      });
+      return [{ file, relPath: currentPath }];
+    } else if (entry.isDirectory) {
+      const dirReader = entry.createReader();
+      const childEntries = [];
+
+      const readBatch = () =>
+        new Promise((resolve, reject) => {
+          dirReader.readEntries(resolve, reject);
+        });
+
+      while (true) {
+        const batch = await readBatch();
+        if (!batch || batch.length === 0) break;
+        childEntries.push(...batch);
+      }
+
+      if (childEntries.length === 0) {
+        // Empty directory dropped: create it directly
+        try {
+          await window.authManager.api("/api/files/create", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ path: currentPath, is_directory: true }),
+          });
+          this.expandedFolders.add(currentPath);
+        } catch (_) {}
+      }
+
+      const nested = await Promise.all(
+        childEntries.map((child) => this._traverseFileEntry(child, currentPath))
+      );
+      return nested.flat();
+    }
+    return [];
   }
 
   async openFolder() {

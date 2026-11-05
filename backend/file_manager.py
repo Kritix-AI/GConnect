@@ -247,10 +247,11 @@ def create_item(req: FileCreateRequest) -> Dict[str, Any]:
 async def upload_files(
     files: List[UploadFile] = File(...),
     target_dir: str = Form(""),
+    rel_path: Optional[str] = Form(None),
 ) -> Dict[str, Any]:
     """Uploads one or more files into the workspace or a specified subfolder.
     Enforces strict path traversal checks on destination folder and filenames.
-    Preserves relative subfolder hierarchy when uploading directories."""
+    Preserves relative subfolder hierarchy when uploading directories or using rel_path."""
     dest_dir = _resolve_safe_path(target_dir)
     if dest_dir.is_file():
         dest_dir = dest_dir.parent
@@ -260,7 +261,17 @@ async def upload_files(
     uploaded: List[Dict[str, Any]] = []
 
     for file in files:
-        raw_name = (file.filename or "uploaded_file").replace("\\", "/")
+        if rel_path and rel_path.strip():
+            raw_source = rel_path.strip().replace("\\", "/")
+            if raw_source.endswith("/"):
+                raw_name = f"{raw_source.rstrip('/')}/{file.filename or 'uploaded_file'}".replace("\\", "/")
+            elif len(files) > 1:
+                raw_name = f"{raw_source.rstrip('/')}/{file.filename or 'uploaded_file'}".replace("\\", "/")
+            else:
+                raw_name = raw_source
+        else:
+            raw_name = (file.filename or "uploaded_file").replace("\\", "/")
+
         # Sanitize components to prevent path traversal while preserving relative subfolder hierarchy
         parts = [
             p.strip()
@@ -276,19 +287,19 @@ async def upload_files(
         else:
             combined = rel_subpath
 
-        target_path = _resolve_safe_path(combined)
-        os.makedirs(target_path.parent, exist_ok=True)
+        dest = _resolve_safe_path(combined)
+        os.makedirs(dest.parent, exist_ok=True)
 
         bytes_written = 0
-        async with aiofiles.open(target_path, "wb") as out_f:
+        async with aiofiles.open(dest, "wb") as out_f:
             while chunk := await file.read(1024 * 1024):
                 await out_f.write(chunk)
                 bytes_written += len(chunk)
 
-        rel_path = str(target_path.relative_to(base)).replace("\\", "/")
+        dest_rel = str(dest.relative_to(base)).replace("\\", "/")
         uploaded.append({
-            "name": target_path.name,
-            "path": rel_path,
+            "name": dest.name,
+            "path": dest_rel,
             "bytes": bytes_written,
         })
 

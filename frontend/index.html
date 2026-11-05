@@ -143,11 +143,17 @@
           <button class="icon-btn" id="btnNewFile" title="New Python Script">
             <i data-lucide="file-plus" class="icon-sm"></i>
           </button>
-          <button class="icon-btn" id="btnImportFiles" title="Import File(s) into Workspace">
-            <i data-lucide="upload" class="icon-sm"></i>
-          </button>
-          <input type="file" id="fileImportInput" multiple style="display: none;" />
-          <input type="file" id="folderImportInput" webkitdirectory directory multiple style="display: none;" />
+          <div class="import-dropdown-wrapper">
+            <button class="icon-btn" id="btnImportFiles" title="Import">
+              <i data-lucide="upload" class="icon-sm"></i>
+            </button>
+            <div class="import-dropdown-menu hidden" id="importDropdownMenu">
+              <button class="import-dropdown-item" id="btnImportFilesOption"><span class="item-icon">📄</span> Import File(s)...</button>
+              <button class="import-dropdown-item" id="btnImportFolderOption"><span class="item-icon">📁</span> Import Folder...</button>
+            </div>
+            <input type="file" id="fileImportInput" multiple style="display: none;" />
+            <input type="file" id="folderImportInput" webkitdirectory directory multiple style="display: none;" />
+          </div>
           <button class="icon-btn" id="btnExportZip" title="Export Workspace as ZIP">
             <i data-lucide="archive" class="icon-sm"></i>
           </button>
