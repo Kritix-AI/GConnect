@@ -442,3 +442,157 @@ def test_pty_terminal_rejects_when_no_docker_and_no_fallback(authed_client):
     with authed_client.websocket_connect(f"/ws/terminal?token={TEST_TOKEN}") as ws:
         msg = ws.receive_text()
         assert "fallback is disabled" in msg
+
+
+# ----------------------------------------------------------------------
+# R4 / R5 / R6: Terminal Enhancements, Multi-Terminal & Venv Integration
+# ----------------------------------------------------------------------
+
+def test_create_exec_pty_venv_startup_injection(monkeypatch):
+    """Mocks DockerSandboxManager, simulates /workspace/.venv/bin/activate presence,
+    and verifies create_exec_pty() startup command/environment includes
+    'source /workspace/.venv/bin/activate'."""
+    from backend.docker_manager import DockerSandboxManager
+
+    mgr = DockerSandboxManager.__new__(DockerSandboxManager)
+    mgr.docker_available = True
+    mgr.client = MagicMock()
+    mock_container = MagicMock()
+    mock_container.id = "c-12345678"
+    mgr.get_or_create_container = MagicMock(return_value=mock_container)
+
+    # Simulate presence of /workspace/.venv/bin/activate
+    mgr.detect_workspace_venv = MagicMock(return_value="/workspace/.venv/bin/activate")
+
+    mgr.client.api.exec_create.return_value = {"Id": "exec-abc"}
+    mgr.client.api.exec_start.return_value = MagicMock()
+
+    res = mgr.create_exec_pty()
+    assert res is not None
+    exec_id, sock = res
+    assert exec_id == "exec-abc"
+
+    mgr.client.api.exec_create.assert_called_once()
+    kwargs = mgr.client.api.exec_create.call_args[1]
+    prompt_cmd = kwargs["environment"]["PROMPT_COMMAND"]
+    assert 'source "/workspace/.venv/bin/activate"' in prompt_cmd
+
+
+def test_create_exec_pty_venv_startup_injection_negative(monkeypatch):
+    """Simulates absence of activate script and verifies venv activation
+    is NOT injected into PROMPT_COMMAND."""
+    from backend.docker_manager import DockerSandboxManager
+
+    mgr = DockerSandboxManager.__new__(DockerSandboxManager)
+    mgr.docker_available = True
+    mgr.client = MagicMock()
+    mock_container = MagicMock()
+    mock_container.id = "c-12345678"
+    mgr.get_or_create_container = MagicMock(return_value=mock_container)
+
+    # Simulate absence of virtualenv activate scripts
+    mgr.detect_workspace_venv = MagicMock(return_value=None)
+
+    mgr.client.api.exec_create.return_value = {"Id": "exec-xyz"}
+    mgr.client.api.exec_start.return_value = MagicMock()
+
+    res = mgr.create_exec_pty()
+    assert res is not None
+
+    kwargs = mgr.client.api.exec_create.call_args[1]
+    prompt_cmd = kwargs["environment"]["PROMPT_COMMAND"]
+    assert "_GCONNECT_VENV_INIT" not in prompt_cmd
+    assert "source" not in prompt_cmd
+
+
+def test_create_exec_pty_git_branch_ps1_and_git_colors(monkeypatch):
+    """Verifies create_exec_pty() configures color.ui auto and dynamic
+    parse_git_branch / PS1."""
+    from backend.docker_manager import DockerSandboxManager
+
+    mgr = DockerSandboxManager.__new__(DockerSandboxManager)
+    mgr.docker_available = True
+    mgr.client = MagicMock()
+    mock_container = MagicMock()
+    mock_container.id = "c-12345678"
+    mgr.get_or_create_container = MagicMock(return_value=mock_container)
+    mgr.detect_workspace_venv = MagicMock(return_value=None)
+
+    mgr.client.api.exec_create.return_value = {"Id": "exec-git"}
+    mgr.client.api.exec_start.return_value = MagicMock()
+
+    res = mgr.create_exec_pty()
+    assert res is not None
+
+    kwargs = mgr.client.api.exec_create.call_args[1]
+    prompt_cmd = kwargs["environment"]["PROMPT_COMMAND"]
+    assert "git config --global color.ui auto" in prompt_cmd
+    assert "parse_git_branch()" in prompt_cmd
+    assert "PS1=" in prompt_cmd
+    assert "gconnect" in prompt_cmd
+
+
+def test_multi_terminal_session_initialization(authed_client, monkeypatch):
+    """Verifies multiple concurrent WebSocket connections to /ws/terminal?token=...&client_id=...
+    establish distinct sessions, register with connection_tracker, and closing one retains the other."""
+    from backend.connection_tracker import connection_tracker
+    from backend import main as app_module
+    from tests.conftest import TEST_TOKEN
+
+    async def mock_handle_websocket(ws):
+        await ws.accept()
+        try:
+            while True:
+                msg = await ws.receive_text()
+                if msg == "close":
+                    break
+                await ws.send_text(f"echo:{msg}")
+        except Exception:
+            pass
+
+    monkeypatch.setattr(app_module.pty_bridge, "handle_websocket", mock_handle_websocket)
+
+    client1_id = "term-client-tab-1"
+    client2_id = "term-client-tab-2"
+
+    with authed_client.websocket_connect(f"/ws/terminal?token={TEST_TOKEN}&client_id={client1_id}") as ws1:
+        ws1.send_text("hello-tab-1")
+        assert ws1.receive_text() == "echo:hello-tab-1"
+
+        # Tab 1 should be registered in connection_tracker
+        devices = connection_tracker.get_connected_devices()["devices"]
+        dev1 = next((d for d in devices if d.get("id") == f"id-{client1_id}"), None)
+        assert dev1 is not None
+        assert "terminal" in dev1["channels"]
+
+        # Open concurrent session for Tab 2
+        with authed_client.websocket_connect(f"/ws/terminal?token={TEST_TOKEN}&client_id={client2_id}") as ws2:
+            ws2.send_text("hello-tab-2")
+            assert ws2.receive_text() == "echo:hello-tab-2"
+
+            devices_both = connection_tracker.get_connected_devices()["devices"]
+            dev1_active = next((d for d in devices_both if d.get("id") == f"id-{client1_id}"), None)
+            dev2_active = next((d for d in devices_both if d.get("id") == f"id-{client2_id}"), None)
+            assert dev1_active is not None
+            assert dev2_active is not None
+            assert "terminal" in dev1_active["channels"]
+            assert "terminal" in dev2_active["channels"]
+
+            # Close Tab 2
+            ws2.send_text("close")
+
+        # After exiting Tab 2 context, Tab 2 socket is unregistered, but Tab 1 remains active
+        devices_after = connection_tracker.get_connected_devices()["devices"]
+        dev1_retained = next((d for d in devices_after if d.get("id") == f"id-{client1_id}"), None)
+        assert dev1_retained is not None
+        assert "terminal" in dev1_retained["channels"]
+
+        dev2_retained = next((d for d in devices_after if d.get("id") == f"id-{client2_id}"), None)
+        if dev2_retained is not None:
+            assert "terminal" not in dev2_retained["channels"]
+
+        # Tab 1 remains fully functional
+        ws1.send_text("still-here")
+        assert ws1.receive_text() == "echo:still-here"
+        ws1.send_text("close")
+

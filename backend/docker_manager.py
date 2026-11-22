@@ -497,10 +497,10 @@ class DockerSandboxManager:
                     logger.info(f"Starting stopped container {settings.CONTAINER_NAME}...")
                     container.start()
                     container.reload()
-                    self.provision_container_audio(container)
+                    self.ensure_sandbox_ready(container)
                     return container
                 else:
-                    self.provision_container_audio(container)
+                    self.ensure_sandbox_ready(container)
                     return container
             except Exception:
                 pass
@@ -540,7 +540,7 @@ class DockerSandboxManager:
             )
 
             logger.info(f"Container '{settings.CONTAINER_NAME}' started (ID: {container.short_id}).")
-            self.provision_container_audio(container)
+            self.ensure_sandbox_ready(container)
             return container
 
         except Exception as e:
@@ -664,9 +664,60 @@ class DockerSandboxManager:
             logger.warning("Failed to provision container audio: %s", e)
             return False
 
+    def provision_container_git_config(self, container: Any = None) -> bool:
+        """Configures global Git color output in the container."""
+        try:
+            if container is None:
+                if not self.docker_available or not self.client:
+                    return False
+                try:
+                    container = self.client.containers.get(settings.CONTAINER_NAME)
+                except Exception:
+                    return False
+            if not container or not hasattr(container, "exec_run"):
+                return False
+            gitconfig_cmd = (
+                "command -v git >/dev/null 2>&1 && ("
+                "git config --global color.ui auto && "
+                "git config --global color.status auto && "
+                "git config --global color.diff auto && "
+                "git config --global color.branch auto"
+                ") || true"
+            )
+            container.exec_run(["bash", "-c", gitconfig_cmd])
+            return True
+        except Exception as e:
+            logger.debug(f"Could not provision container git config: {e}")
+            return False
+
     def ensure_sandbox_ready(self, container: Any = None) -> bool:
-        """Lifecycle hook to ensure all container services including audio virtualization are ready."""
-        return self.provision_container_audio(container)
+        """Lifecycle hook to ensure all container services including audio virtualization and git config are ready."""
+        audio_ok = self.provision_container_audio(container)
+        git_ok = self.provision_container_git_config(container)
+        return audio_ok and git_ok
+
+    def detect_workspace_venv(self, container: Any = None) -> Optional[str]:
+        """Detects if a POSIX virtual environment exists in /workspace (.venv or venv)."""
+        workspace = Path(settings.WORKSPACE_DIR)
+        for rel in [".venv", "venv"]:
+            try:
+                host_act = workspace / rel / "bin" / "activate"
+                if host_act.is_file():
+                    return f"/workspace/{rel}/bin/activate"
+            except Exception:
+                pass
+
+        if container and hasattr(container, "exec_run"):
+            try:
+                for candidate in ["/workspace/.venv/bin/activate", "/workspace/venv/bin/activate"]:
+                    res = container.exec_run(["test", "-f", candidate])
+                    exit_code = getattr(res, "exit_code", None)
+                    if exit_code == 0:
+                        return candidate
+            except Exception:
+                pass
+
+        return None
 
     def get_status(self) -> Dict[str, Any]:
         """Returns the current container and Docker daemon status."""
@@ -674,6 +725,7 @@ class DockerSandboxManager:
             self._ensure_docker()
 
         hf_cache_location = "/root/.cache/huggingface (ephemeral)" if settings.EPHEMERAL_MODE else "/workspace/.hf_cache"
+        venv_act = self.detect_workspace_venv()
         status = {
             "docker_available": self.docker_available,
             "gpu_passthrough": self.gpu_passthrough_available,
@@ -684,7 +736,9 @@ class DockerSandboxManager:
             "inference_port": settings.INFERENCE_PORT,
             "shm_size": settings.SHM_SIZE,
             "ephemeral_mode": settings.EPHEMERAL_MODE,
-            "hf_cache": hf_cache_location
+            "hf_cache": hf_cache_location,
+            "has_venv": bool(venv_act),
+            "venv_path": venv_act,
         }
 
         if not self.docker_available or not self.client:
@@ -713,6 +767,11 @@ class DockerSandboxManager:
             container = self.client.containers.get(settings.CONTAINER_NAME)
             status["container_status"] = container.status
             status["container_id"] = container.short_id
+            if not venv_act and container.status == "running":
+                c_venv = self.detect_workspace_venv(container)
+                if c_venv:
+                    status["has_venv"] = True
+                    status["venv_path"] = c_venv
         except Exception:
             status["container_status"] = "not_found"
 
@@ -837,10 +896,35 @@ class DockerSandboxManager:
 
         hf_home = "/root/.cache/huggingface" if settings.EPHEMERAL_MODE else "/workspace/.hf_cache"
 
-        prompt_cmd = (
-            'PS1="\\[\\e[1;36m\\]gconnect\\[\\e[0m\\]:\\[\\e[1;32m\\]\\w\\[\\e[0m\\]\\$ \\[\\e[1;37m\\]"; '
+        # Detect workspace virtual environment
+        venv_act = self.detect_workspace_venv(container)
+        venv_injection = (
+            f'if [ -z "$_GCONNECT_VENV_INIT" ]; then export _GCONNECT_VENV_INIT=1; [ -f "{venv_act}" ] && source "{venv_act}"; fi; '
+            if venv_act
+            else ""
+        )
+
+        # Ensure git colors configured in session
+        git_init = (
+            'if [ -z "$_GCONNECT_GIT_INIT" ]; then export _GCONNECT_GIT_INIT=1; '
+            'command -v git >/dev/null 2>&1 && git config --global color.ui auto 2>/dev/null || true; fi; '
+        )
+
+        # Dynamic branch parsing with sed fallback (no colrm dependency)
+        branch_fn = (
+            'parse_git_branch() { git branch --show-current 2>/dev/null || (git branch 2>/dev/null | sed -n "s/^* //p"); }; '
+        )
+
+        # Dynamic prompt with ANSI colors, venv prefix, and branch indicator
+        prompt_setup = (
+            'PS1="$(if [ -n "$VIRTUAL_ENV" ]; then echo "($(basename "$VIRTUAL_ENV")) "; fi)'
+            '\\[\\e[1;36m\\]gconnect\\[\\e[0m\\]:\\[\\e[1;32m\\]\\w\\[\\e[0m\\]'
+            '$(b=$(parse_git_branch); [ -n "$b" ] && echo " \\[\\e[1;33m\\]($b)\\[\\e[0m\\]")'
+            '\\$ \\[\\e[1;37m\\]"; '
             'trap \'printf "\\e[0m"\' DEBUG'
         )
+
+        prompt_cmd = venv_injection + git_init + branch_fn + prompt_setup
 
         try:
             exec_instance = self.client.api.exec_create(

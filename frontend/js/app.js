@@ -193,6 +193,12 @@ class AppManager {
       } else if ((e.ctrlKey || e.metaKey) && e.key === "s") {
         e.preventDefault();
         window.editorManager.saveCurrentFile();
+      } else if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === "`" || e.key === "~")) {
+        e.preventDefault();
+        this.switchPanel("terminal");
+        if (window.terminalManager && typeof window.terminalManager.createSession === "function") {
+          window.terminalManager.createSession();
+        }
       }
     });
   }
@@ -528,6 +534,10 @@ print("========================================")
     this.tabProblems.classList.toggle("active", !terminalActive);
     this.xtermContainer.classList.toggle("hidden", !terminalActive);
     this.problemsContainer.classList.toggle("hidden", terminalActive);
+    const tabsStrip = document.getElementById("terminalTabsStrip");
+    const btnNewTerm = document.getElementById("btnNewTerminal");
+    if (tabsStrip) tabsStrip.classList.toggle("hidden", !terminalActive);
+    if (btnNewTerm) btnNewTerm.classList.toggle("hidden", !terminalActive);
     if (terminalActive) {
       // xterm measured itself inside a display:none box - refit on return.
       window.terminalManager.fit();

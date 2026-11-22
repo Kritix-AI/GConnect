@@ -1,11 +1,15 @@
-class TerminalManager {
-  constructor() {
+class TerminalSession {
+  constructor(id, title, manager) {
+    this.id = id;
+    this.title = title || "bash";
+    this.manager = manager;
     this.term = null;
     this.fitAddon = null;
     this.ws = null;
-    this.statusBadge = document.getElementById("terminalStatusBadge");
+    this.containerEl = null;
     this.reconnectTimeout = null;
     this._connecting = false;
+    this.isConnected = false;
   }
 
   init() {
@@ -14,9 +18,21 @@ class TerminalManager {
       return;
     }
 
+    const parentContainer = document.getElementById("xtermContainer");
+    if (!parentContainer) {
+      console.error("#xtermContainer not found.");
+      return;
+    }
+
+    // Dedicated child container element for this terminal instance inside #xtermContainer
+    this.containerEl = document.createElement("div");
+    this.containerEl.className = "terminal-session-container";
+    this.containerEl.id = `terminalSession_${this.id}`;
+    parentContainer.appendChild(this.containerEl);
+
     this.term = new Terminal({
       cursorBlink: true,
-      cursorStyle: "bar",
+      cursorStyle: "block",
       fontSize: 13,
       lineHeight: 1.15,
       fontFamily: "'JetBrains Mono', Consolas, 'Courier New', monospace",
@@ -65,10 +81,11 @@ class TerminalManager {
 
       // 2. Ctrl+V, Cmd+V, or Ctrl+Shift+V: Paste from clipboard
       if ((event.ctrlKey || event.metaKey) && (event.key === "v" || event.key === "V")) {
+        event.preventDefault();
         if (event.type === "keydown") {
           navigator.clipboard.readText().then((text) => {
-            if (text && this.ws && this.ws.readyState === WebSocket.OPEN) {
-              this.ws.send(text);
+            if (text) {
+              this.paste(text);
             }
           }).catch((err) => console.warn("Clipboard read error:", err));
         }
@@ -77,10 +94,11 @@ class TerminalManager {
 
       // 3. Shift+Insert: Paste from clipboard
       if (event.shiftKey && event.key === "Insert") {
+        event.preventDefault();
         if (event.type === "keydown") {
           navigator.clipboard.readText().then((text) => {
-            if (text && this.ws && this.ws.readyState === WebSocket.OPEN) {
-              this.ws.send(text);
+            if (text) {
+              this.paste(text);
             }
           }).catch((err) => console.warn("Clipboard read error:", err));
         }
@@ -90,103 +108,20 @@ class TerminalManager {
       return true;
     });
 
-    const container = document.getElementById("xtermContainer");
-    if (container) {
-      this.term.open(container);
+    this.term.open(this.containerEl);
 
-      // Terminal Context Menu setup
-      const contextMenu = document.getElementById("terminalContextMenu");
-      const btnCopy = document.getElementById("ctxMenuCopy");
-      const btnPaste = document.getElementById("ctxMenuPaste");
-      const btnSelectAll = document.getElementById("ctxMenuSelectAll");
-      const btnClear = document.getElementById("ctxMenuClear");
+    // Enable bracketed multi-line paste mode on terminal open
+    this.term.write("\x1b[?2004h");
 
-      const hideContextMenu = () => {
-        if (contextMenu && !contextMenu.classList.contains("hidden")) {
-          contextMenu.classList.add("hidden");
+    // Copy-on-select support: highlight text to copy automatically
+    this.term.onSelectionChange(() => {
+      if (this.term.hasSelection()) {
+        const selected = this.term.getSelection();
+        if (selected && selected.trim()) {
+          navigator.clipboard.writeText(selected).catch(() => {});
         }
-      };
-
-      if (contextMenu) {
-        container.addEventListener("contextmenu", (e) => {
-          e.preventDefault();
-          const hasSel = this.term.hasSelection();
-          if (btnCopy) btnCopy.disabled = !hasSel;
-
-          const menuWidth = 185;
-          const menuHeight = 150;
-          let x = e.clientX;
-          let y = e.clientY;
-          if (x + menuWidth > window.innerWidth) x = window.innerWidth - menuWidth - 8;
-          if (y + menuHeight > window.innerHeight) y = window.innerHeight - menuHeight - 8;
-
-          contextMenu.style.left = `${Math.max(8, x)}px`;
-          contextMenu.style.top = `${Math.max(8, y)}px`;
-          contextMenu.classList.remove("hidden");
-          if (window.lucide) lucide.createIcons();
-        });
-
-        if (btnCopy) {
-          btnCopy.addEventListener("click", () => {
-            if (this.term.hasSelection()) {
-              navigator.clipboard.writeText(this.term.getSelection());
-            }
-            hideContextMenu();
-          });
-        }
-
-        if (btnPaste) {
-          btnPaste.addEventListener("click", () => {
-            navigator.clipboard.readText().then((text) => {
-              if (text && this.ws && this.ws.readyState === WebSocket.OPEN) {
-                this.ws.send(text);
-              }
-            }).catch((err) => console.warn("Clipboard read error:", err));
-            hideContextMenu();
-          });
-        }
-
-        if (btnSelectAll) {
-          btnSelectAll.addEventListener("click", () => {
-            this.term.selectAll();
-            hideContextMenu();
-          });
-        }
-
-        if (btnClear) {
-          btnClear.addEventListener("click", () => {
-            this.clear();
-            hideContextMenu();
-          });
-        }
-
-        window.addEventListener("click", (e) => {
-          if (!contextMenu.contains(e.target)) {
-            hideContextMenu();
-          }
-        });
-
-        window.addEventListener("keydown", (e) => {
-          if (e.key === "Escape") {
-            hideContextMenu();
-          }
-        });
       }
-
-      // Copy-on-select support: highlight text to copy automatically
-      this.term.onSelectionChange(() => {
-        if (this.term.hasSelection()) {
-          const selected = this.term.getSelection();
-          if (selected && selected.trim()) {
-            navigator.clipboard.writeText(selected).catch(() => {});
-          }
-        }
-      });
-
-      setTimeout(() => this.fit(), 100);
-    }
-
-    this.connect();
+    });
 
     this.term.onData((data) => {
       if (this.ws && this.ws.readyState === WebSocket.OPEN) {
@@ -195,9 +130,16 @@ class TerminalManager {
       }
     });
 
-    window.addEventListener("resize", () => {
-      this.fit();
-    });
+    this.connect();
+
+    setTimeout(() => this.fit(), 100);
+  }
+
+  paste(text) {
+    if (!text || !this.term) return;
+    // Normalize line endings: CRLF and LF to CR
+    const normalized = text.replace(/\r\n/g, "\r").replace(/\n/g, "\r");
+    this.term.paste(normalized);
   }
 
   /**
@@ -215,7 +157,7 @@ class TerminalManager {
     }
 
     window.authManager.ready().then(() => {
-      const url = window.authManager.wsUrl("/ws/terminal");
+      const url = window.authManager.wsUrl(`/ws/terminal?session=${encodeURIComponent(this.id)}`);
 
       try {
         this.ws = new WebSocket(url);
@@ -223,7 +165,8 @@ class TerminalManager {
         this.ws.binaryType = "arraybuffer";
       } catch (err) {
         console.warn("Terminal WebSocket error:", err);
-        this.setStatus(false);
+        this.isConnected = false;
+        this.manager.onSessionStatusChange(this, "disconnected");
         this._connecting = false;
         this.scheduleReconnect();
         return;
@@ -231,14 +174,22 @@ class TerminalManager {
 
       this.ws.onopen = () => {
         this._connecting = false;
+        this.isConnected = true;
+        this.manager.onSessionStatusChange(this, "connected");
+        // Enable bracketed multi-line paste mode upon connection
+        if (this.term) {
+          this.term.write("\x1b[?2004h");
+        }
         this.fit();
       };
 
       this.ws.onmessage = (event) => {
         if (typeof event.data === "string" && event.data.includes("Docker sandbox is not running")) {
-          this.setStatus("disconnected");
+          this.isConnected = false;
+          this.manager.onSessionStatusChange(this, "disconnected");
         } else {
-          this.setStatus("connected");
+          this.isConnected = true;
+          this.manager.onSessionStatusChange(this, "connected");
         }
 
         if (this.term) {
@@ -253,10 +204,10 @@ class TerminalManager {
 
       this.ws.onclose = (event) => {
         this._connecting = false;
-        this.setStatus("disconnected");
+        this.isConnected = false;
+        this.manager.onSessionStatusChange(this, "disconnected");
         if (event && event.code === 4500) {
-          // Server says the sandbox is unavailable (no Docker): stop the
-          // reconnect loop - the yellow banner + Retry button take over.
+          // Server says the sandbox is unavailable (no Docker): stop reconnect loop
           this.ws = null;
           return;
         }
@@ -264,6 +215,8 @@ class TerminalManager {
       };
 
       this.ws.onerror = () => {
+        this.isConnected = false;
+        this.manager.onSessionStatusChange(this, "disconnected");
         if (this.ws) this.ws.close();
       };
     });
@@ -294,27 +247,17 @@ class TerminalManager {
     }, 3000);
   }
 
-  setStatus(state) {
-    if (!this.statusBadge) return;
-    if (state === true) state = "connected";
-    if (state === false) state = "disconnected";
-    if (state === "connected") {
-      this.statusBadge.textContent = "Connected";
-      this.statusBadge.className = "connection-status connected";
-    } else {
-      this.statusBadge.textContent = "Disconnected";
-      this.statusBadge.className = "connection-status disconnected";
-    }
-  }
-
   fit() {
+    // Safe fit: only measure and resize if the container element is currently visible
+    if (!this.containerEl || this.containerEl.classList.contains("hidden") || this.containerEl.offsetParent === null) {
+      return;
+    }
     if (this.fitAddon && this.term) {
       try {
         this.fitAddon.fit();
         this.term.scrollToBottom();
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-          // Control messages travel as BINARY frames - text frames are raw
-          // terminal input, so no sniffing is needed server-side.
+          // Control messages travel as BINARY frames
           const payload = JSON.stringify({
             type: "resize",
             cols: this.term.cols,
@@ -329,11 +272,6 @@ class TerminalManager {
   }
 
   sendCommand(cmd) {
-    // A fresh python run invalidates previous TERMINAL problems; editor
-    // lint diagnostics are independent and stay.
-    if (cmd.trim().startsWith("python") && window.problemsManager) {
-      window.problemsManager.clearTerminalProblems();
-    }
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(`${cmd}\n`);
     } else {
@@ -352,6 +290,396 @@ class TerminalManager {
       this.term.focus();
     }
   }
+
+  dispose() {
+    this._teardownSocket();
+    if (this.term) {
+      try {
+        this.term.dispose();
+      } catch (err) {
+        console.warn("Error disposing terminal:", err);
+      }
+      this.term = null;
+    }
+    if (this.containerEl && this.containerEl.parentNode) {
+      this.containerEl.parentNode.removeChild(this.containerEl);
+      this.containerEl = null;
+    }
+  }
+}
+
+class TerminalManager {
+  constructor() {
+    this.sessions = [];
+    this.activeSessionId = null;
+    this._sessionCounter = 0;
+    this._initialized = false;
+
+    this.statusBadge = null;
+    this.tabsStrip = null;
+    this.btnNewTerminal = null;
+    this.xtermContainer = null;
+    this.terminalPane = null;
+  }
+
+  init() {
+    if (this._initialized) return;
+    this._initialized = true;
+
+    this.statusBadge = document.getElementById("terminalStatusBadge");
+    this.tabsStrip = document.getElementById("terminalTabsStrip");
+    this.btnNewTerminal = document.getElementById("btnNewTerminal");
+    this.xtermContainer = document.getElementById("xtermContainer");
+    this.terminalPane = document.getElementById("terminalPane");
+
+    // Setup context menu on #xtermContainer
+    this.setupContextMenu();
+
+    // R2: Ensure clicking anywhere within #terminalPane or #xtermContainer immediately focuses active terminal
+    if (this.terminalPane) {
+      this.terminalPane.addEventListener("click", (e) => {
+        // If clicking on a button, tab, or context menu inside terminalPane, do not intercept
+        if (e.target.closest("button") || e.target.closest(".terminal-tab") || e.target.closest("#terminalContextMenu")) {
+          return;
+        }
+        this.focus();
+      });
+    }
+
+    if (this.xtermContainer) {
+      this.xtermContainer.addEventListener("click", () => {
+        this.focus();
+      });
+    }
+
+    // New terminal button [+]
+    if (this.btnNewTerminal) {
+      this.btnNewTerminal.addEventListener("click", () => {
+        this.createSession();
+      });
+    }
+
+    // Window resize handler
+    window.addEventListener("resize", () => {
+      this.fit();
+    });
+
+    // Create the first default terminal session
+    this.createSession("bash 1");
+  }
+
+  createSession(title) {
+    if (window.appManager && typeof window.appManager.switchPanel === "function") {
+      window.appManager.switchPanel("terminal");
+    }
+
+    this._sessionCounter++;
+    const sessionTitle = title || `bash ${this._sessionCounter}`;
+    const id = `session-${Date.now()}-${this._sessionCounter}`;
+    const session = new TerminalSession(id, sessionTitle, this);
+    this.sessions.push(session);
+    session.init();
+    this.activateSession(id);
+    this.updateTabsUI();
+    return session;
+  }
+
+  getActiveSession() {
+    if (!this.sessions || this.sessions.length === 0) return null;
+    return this.sessions.find((s) => s.id === this.activeSessionId) || this.sessions[0];
+  }
+
+  activateSession(sessionId) {
+    const session = this.sessions.find((s) => s.id === sessionId);
+    if (!session) return;
+    this.activeSessionId = sessionId;
+
+    // Update tab pills active class & aria-selected
+    if (this.tabsStrip) {
+      const tabs = this.tabsStrip.querySelectorAll(".terminal-tab");
+      tabs.forEach((tab) => {
+        const isActive = tab.dataset.sessionId === sessionId;
+        tab.classList.toggle("active", isActive);
+        tab.setAttribute("aria-selected", isActive ? "true" : "false");
+      });
+    }
+
+    // Toggle session container visibility
+    for (const s of this.sessions) {
+      if (s.containerEl) {
+        if (s.id === sessionId) {
+          s.containerEl.classList.remove("hidden");
+        } else {
+          s.containerEl.classList.add("hidden");
+        }
+      }
+    }
+
+    // Update status badge for active session
+    this.setStatus(session.isConnected ? "connected" : "disconnected");
+
+    // Safe fit & focus active terminal
+    session.fit();
+    setTimeout(() => session.fit(), 50);
+    session.focus();
+  }
+
+  closeSession(sessionId) {
+    // Sole remaining tab protection: if only 1 terminal session remains, it cannot be closed
+    if (this.sessions.length <= 1) {
+      return;
+    }
+
+    const index = this.sessions.findIndex((s) => s.id === sessionId);
+    if (index === -1) return;
+
+    const sessionToClose = this.sessions[index];
+    const wasActive = this.activeSessionId === sessionId;
+
+    let nextSessionId = null;
+    if (wasActive) {
+      if (index + 1 < this.sessions.length) {
+        nextSessionId = this.sessions[index + 1].id;
+      } else if (index - 1 >= 0) {
+        nextSessionId = this.sessions[index - 1].id;
+      }
+    }
+
+    sessionToClose.dispose();
+    this.sessions.splice(index, 1);
+
+    if (wasActive && nextSessionId) {
+      this.activateSession(nextSessionId);
+    }
+
+    this.updateTabsUI();
+  }
+
+  updateTabsUI() {
+    if (!this.tabsStrip) {
+      this.tabsStrip = document.getElementById("terminalTabsStrip");
+    }
+    if (!this.tabsStrip) return;
+
+    this.tabsStrip.innerHTML = "";
+    const isOnlyOne = this.sessions.length <= 1;
+
+    for (const session of this.sessions) {
+      const tabEl = document.createElement("div");
+      tabEl.className = `terminal-tab ${session.id === this.activeSessionId ? "active" : ""}`;
+      tabEl.dataset.sessionId = session.id;
+      tabEl.setAttribute("role", "tab");
+      tabEl.setAttribute("aria-selected", session.id === this.activeSessionId ? "true" : "false");
+
+      const titleSpan = document.createElement("span");
+      titleSpan.className = "terminal-tab-title";
+      titleSpan.textContent = session.title;
+      titleSpan.title = session.title;
+
+      const closeBtn = document.createElement("button");
+      closeBtn.className = `terminal-tab-close ${isOnlyOne ? "disabled" : ""}`;
+      closeBtn.title = "Close Terminal";
+      closeBtn.setAttribute("aria-label", `Close ${session.title}`);
+      if (isOnlyOne) {
+        closeBtn.disabled = true;
+      }
+      closeBtn.innerHTML = `<i data-lucide="x" class="icon-xs"></i>`;
+
+      tabEl.appendChild(titleSpan);
+      tabEl.appendChild(closeBtn);
+
+      tabEl.addEventListener("click", (e) => {
+        if (e.target.closest(".terminal-tab-close")) return;
+        this.activateSession(session.id);
+      });
+
+      closeBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this.closeSession(session.id);
+      });
+
+      this.tabsStrip.appendChild(tabEl);
+    }
+
+    if (window.lucide && typeof window.lucide.createIcons === "function") {
+      window.lucide.createIcons();
+    }
+  }
+
+  onSessionStatusChange(session, status) {
+    if (session.id === this.activeSessionId) {
+      this.setStatus(status);
+    }
+  }
+
+  setStatus(state) {
+    if (!this.statusBadge) {
+      this.statusBadge = document.getElementById("terminalStatusBadge");
+    }
+    if (!this.statusBadge) return;
+    if (state === true) state = "connected";
+    if (state === false) state = "disconnected";
+    if (state === "connected") {
+      this.statusBadge.textContent = "Connected";
+      this.statusBadge.className = "connection-status connected";
+    } else {
+      this.statusBadge.textContent = "Disconnected";
+      this.statusBadge.className = "connection-status disconnected";
+    }
+  }
+
+  setupContextMenu() {
+    const container = document.getElementById("xtermContainer");
+    const contextMenu = document.getElementById("terminalContextMenu");
+    const btnCopy = document.getElementById("ctxMenuCopy");
+    const btnPaste = document.getElementById("ctxMenuPaste");
+    const btnSelectAll = document.getElementById("ctxMenuSelectAll");
+    const btnClear = document.getElementById("ctxMenuClear");
+
+    const hideContextMenu = () => {
+      if (contextMenu && !contextMenu.classList.contains("hidden")) {
+        contextMenu.classList.add("hidden");
+      }
+    };
+
+    if (contextMenu && container) {
+      container.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        const activeSession = this.getActiveSession();
+        const hasSel = activeSession && activeSession.term ? activeSession.term.hasSelection() : false;
+        if (btnCopy) btnCopy.disabled = !hasSel;
+
+        const menuWidth = 185;
+        const menuHeight = 150;
+        let x = e.clientX;
+        let y = e.clientY;
+        if (x + menuWidth > window.innerWidth) x = window.innerWidth - menuWidth - 8;
+        if (y + menuHeight > window.innerHeight) y = window.innerHeight - menuHeight - 8;
+
+        contextMenu.style.left = `${Math.max(8, x)}px`;
+        contextMenu.style.top = `${Math.max(8, y)}px`;
+        contextMenu.classList.remove("hidden");
+        if (window.lucide && typeof window.lucide.createIcons === "function") {
+          window.lucide.createIcons();
+        }
+      });
+
+      if (btnCopy) {
+        btnCopy.addEventListener("click", () => {
+          const activeSession = this.getActiveSession();
+          if (activeSession && activeSession.term && activeSession.term.hasSelection()) {
+            navigator.clipboard.writeText(activeSession.term.getSelection());
+          }
+          hideContextMenu();
+        });
+      }
+
+      if (btnPaste) {
+        btnPaste.addEventListener("click", () => {
+          navigator.clipboard.readText().then((text) => {
+            const activeSession = this.getActiveSession();
+            if (text && activeSession) {
+              activeSession.paste(text);
+            }
+          }).catch((err) => console.warn("Clipboard read error:", err));
+          hideContextMenu();
+        });
+      }
+
+      if (btnSelectAll) {
+        btnSelectAll.addEventListener("click", () => {
+          const activeSession = this.getActiveSession();
+          if (activeSession && activeSession.term) {
+            activeSession.term.selectAll();
+          }
+          hideContextMenu();
+        });
+      }
+
+      if (btnClear) {
+        btnClear.addEventListener("click", () => {
+          this.clear();
+          hideContextMenu();
+        });
+      }
+
+      window.addEventListener("click", (e) => {
+        if (!contextMenu.contains(e.target)) {
+          hideContextMenu();
+        }
+      });
+
+      window.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") {
+          hideContextMenu();
+        }
+      });
+    }
+  }
+
+  // --- Backwards Compatibility Proxies ---
+
+  get term() {
+    const session = this.getActiveSession();
+    return session ? session.term : null;
+  }
+
+  get fitAddon() {
+    const session = this.getActiveSession();
+    return session ? session.fitAddon : null;
+  }
+
+  get ws() {
+    const session = this.getActiveSession();
+    return session ? session.ws : null;
+  }
+
+  fit() {
+    const session = this.getActiveSession();
+    if (session) {
+      session.fit();
+    }
+  }
+
+  focus() {
+    const session = this.getActiveSession();
+    if (session) {
+      session.focus();
+    }
+  }
+
+  clear() {
+    const session = this.getActiveSession();
+    if (session) {
+      session.clear();
+    }
+  }
+
+  paste(text) {
+    const session = this.getActiveSession();
+    if (session) {
+      session.paste(text);
+    }
+  }
+
+  sendCommand(cmd) {
+    if (cmd.trim().startsWith("python") && window.problemsManager) {
+      window.problemsManager.clearTerminalProblems();
+    }
+    const session = this.getActiveSession();
+    if (session) {
+      session.sendCommand(cmd);
+    } else {
+      console.warn("No active terminal session to send command.");
+    }
+  }
+
+  connect() {
+    for (const session of this.sessions) {
+      session.connect();
+    }
+  }
 }
 
 window.terminalManager = new TerminalManager();
+window.terminal = window.terminalManager;

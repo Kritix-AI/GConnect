@@ -1,5 +1,12 @@
 # GConnect Changelog
 
+## 2.3.3 (2026-11-22) - Git Colors, Paste Deduplication, Multi-Terminal Tabs & Workspace Venv Auto-Activation
+- **Container Git Colors & Dynamic Branch Prompt**: Configured container-wide Git color support (`color.ui auto`) and enhanced bash `PS1` in `create_exec_pty()` with dynamic Git branch rendering in color (`gconnect:/workspace (branch)$`).
+- **Clipboard Paste Deduplication & Formatting**: Eliminated double paste by routing clipboard data exclusively through `term.paste()` and removing redundant WebSocket transmissions. Enabled bracketed multi-line paste mode with normalized line endings (`\r\n` and `\n` to `\r`).
+- **Active Cursor Visibility & Focus**: Configured blinking block cursor (`cursorBlink: true`, `cursorStyle: "block"`) and added container-wide click-to-focus listeners across `#terminalPane` and `#xtermContainer`.
+- **Multi-Terminal Tabs**: Added terminal header tab strip with `[+]` button and per-tab `[x]` closure. Supports concurrent independent terminal sessions with auto-resizing via `fitAddon.fit()`.
+- **Workspace Virtual Environment Auto-Activation**: Auto-detects `/workspace/.venv/bin/activate` or `/workspace/venv/bin/activate` on PTY spawn and injects activation into the startup sequence so terminal sessions launch directly within the virtual environment.
+
 ## 2.3.2 (2026-11-04) - Workspace Open Folder, Collapsible Directory Explorer & Nested Directory Hierarchy
 - **Native Workspace Open Folder Dialog & Sidecar Dynamic Remounting**: Native OS directory picker dialog (`rfd::FileDialog` via Tauri IPC `open_folder_dialog`) allows selecting any local project folder. Automatically updates `connection.json`, restarts backend sidecar with `CONNECT_WORKSPACE_DIR`, and dynamically recreates the Docker sandbox container mounting the selected path to `/workspace`.
 - **Collapsible Directory Tree**: Interactive folder explorer with smooth 150ms rotating chevrons (`folder-chevron` rotating 90°), toggleable subfolder visibility, indented hierarchy layout, and state preservation (`expandedFolders` Set) across file tree refreshes.
